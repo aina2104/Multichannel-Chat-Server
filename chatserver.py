@@ -13,7 +13,7 @@ channel_names = []
 channel_port = []
 channel_capacity = []
 channel_queue_length = []  # not yet implemented
-client_info = {}  # {client_username: client_socket}
+client_info = {}  # {client_username: [client_socket, in-channel/in-queue}
 channel_users = {}  # {channel_names: [[user_1, user_2], [user_1_in_queue, user_2_in_queue]]}
 client_address_users = {}  # {client_address: [client_username, channel_name]}
 
@@ -111,6 +111,18 @@ def duplicate_usernames(username, channel_name):
     return False
 
 
+# Print to server, send message to client for them to print
+def client_join_room(client_username, channel_name, client_socket, code):
+    print(f"[Server Message] {client_username} has joined the channel \"{channel_name}\".", file=stdout)
+    message = f"$0{code}-JoinSuccess: {channel_name}"
+    client_socket.sendall(message.encode())
+
+
+def notify_users_ahead(num_users_ahead, client_socket, code):
+    message = f"$0{code}-InQueue: {num_users_ahead}"
+    client_socket.sendall(message.encode())
+
+
 # When first accepting client's connection, check for username duplicates, channel capacity,
 # queue capacity and return a message that will be sent to client
 def client_first_connection(client_username, index, client_address, client_socket):
@@ -122,17 +134,18 @@ def client_first_connection(client_username, index, client_address, client_socke
         return f"$UserError: {channel_name}"
     # If not error, client info will be stored
     client_address_users[client_address] = [client_username, channel_name]
-    client_info[client_username] = client_socket
     capacity = channel_capacity[index]
     # Enough capacity to join successfully
     if len(channel_users[channel_name][0]) < capacity:
         channel_users[channel_name][0].append(client_username)
-        print(f"[Server Message] {client_username} has joined the channel \"{channel_name}\".", file=stdout)
-        return f"$01-JoinSuccess: {channel_name}"
+        client_info[client_username] = [client_socket, "in-channel"]
+        client_join_room(client_username, channel_name, client_socket, code=1)
     # Wait in queue with X users ahead
-    num_users_ahead = len(channel_users[channel_name][1])
-    channel_users[channel_name][1].append(client_username)
-    return f"$01-InQueue: {num_users_ahead}"
+    else:
+        num_users_ahead = len(channel_users[channel_name][1])
+        channel_users[channel_name][1].append(client_username)
+        client_info[client_username] = [client_socket, "in-queue"]
+        notify_users_ahead(num_users_ahead, client_socket, code=1)
 
 
 # Close connection of a client from a channel, if client is in the room,
@@ -147,10 +160,46 @@ def notify_channel(channel_name, message):
     try:
         print(message, file=stdout)
         for other_client_name in channel_users[channel_name][0]:
-            client_socket = client_info[other_client_name]
+            client_socket = client_info[other_client_name][0]
             client_socket.sendall(message.encode())
     except:
         print("Error while handling notifying channels", file=stdout)
+
+
+# disconnect -> notify channel -> join room/notify users
+def disconnect_client(channel_name, username, client_socket, index):
+    if client_info[username][1] == "in-channel":
+        channel_users[channel_name][0].remove(username)
+        left_notification(username, channel_name)
+        capacity = channel_capacity[index]
+        # check queue and notify people in the queues
+        if len(channel_users[channel_name][0]) < capacity and len(channel_users[channel_name][1]) > 0:
+            next_client = channel_users[channel_name][1].pop(0)
+            channel_users[channel_name][0].append(next_client)
+            next_client_socket = client_info[next_client][0]
+            client_info[next_client][1] = "in-channel"
+            client_join_room(next_client, channel_name, next_client_socket, code=2)
+        position = 0
+    # if remove people in queue, notify the one after (find the index of the removed one)
+    else:
+        position = channel_users[channel_name][1].index(username)
+        channel_users[channel_name][1].remove(username)
+    client_socket.close()
+    # notify others in the queue
+    for pos in range(position, len(channel_users[channel_name][1])):
+        other_client_name = channel_users[channel_name][1][pos]
+        other_client_socket = client_info[other_client_name][0]
+        notify_users_ahead(pos, other_client_socket, code=2)
+
+
+def timeout_notification(username, channel_name):
+    message = f"[Server Message] {username} went AFK in channel \"{channel_name}\"."
+    notify_channel(channel_name, message)
+
+
+def left_notification(username, channel_name):
+    left_channel_msg = f"[Server Message] {username} has left the channel."
+    notify_channel(channel_name, left_channel_msg)
 
 
 # REF: The use of socket.settimeout() is inspired by the code at
@@ -158,27 +207,25 @@ def notify_channel(channel_name, message):
 def handle_client(client_socket, client_address, index):
     with client_socket:
         try:
-            client_socket.settimeout(afk_time)
             while message := client_socket.recv(BUFSIZE).decode():
                 if message[:6] == "$User:":
                     message = client_first_connection(message[7:], index, client_address, client_socket)
                     username, channel_name = client_address_users[client_address]
-                    client_socket.sendall(message.encode())
                 else:
                     username, channel_name = client_address_users[client_address]
                     to_send = f"[{username}] {message}"
                     notify_channel(channel_name, to_send)
+                if client_info[username][1] == "in-channel":
+                    client_socket.settimeout(afk_time)
         except timeout:
             # also send this to all clients in the channel
-            message = f"[Server Message] {username} went AFK in channel \"{channel_name}\"."
-            channel_users[channel_name][0].remove(username)
-            client_socket.close()
-            notify_channel(channel_name, message)
+            timeout_notification(username, channel_name)
+            disconnect_client(channel_name, username, client_socket, index)
         except Exception:
             # close the client's connection if they abruptly close
-            if message[:10] != "$UserError":
+            if message is None or message[:10] != "$UserError":
                 print(f"Connection from {username} closed.")
-            client_socket.close()  # server handles closing client's socket.
+                disconnect_client(channel_name, username, client_socket, index)
     # error or EOF - client disconnected
 
 
