@@ -11,12 +11,12 @@ server_connected = None
 
 
 def invalid_command_line():
-    print("Usage: chatclient port_number client_username\n", file=stderr)
+    print("Usage: chatclient port_number client_username", file=stderr)
     exit(3)
 
 
 def cant_connect(port_num):
-    print(f"Error: Unable to connect to port {port_num}.\n")
+    print(f"Error: Unable to connect to port {port_num}.")
     exit(7)
 
 
@@ -24,7 +24,7 @@ def cant_connect(port_num):
 # REF: https://stackoverflow.com/questions/1489669/how-to-exit-the-entire-application-from-a-python-thread
 def username_error(channel_name):
     print(f"[Server Message] Channel \"{channel_name}\" already has user "
-          f"{client_username}.\n", file=stdout)
+          f"{client_username}.", file=stdout)
     os._exit(2)
 
 
@@ -53,13 +53,10 @@ def read_from_stdin(server_socket):
     try:
         while line := input():
             server_socket.send(line.encode())
-            data = server_socket.recv(BUFSIZE).decode()
-            if not data:
-                break
-            if data == "$Pass":
-                continue
-            stdout.buffer.write(data)
-            stdout.flush()
+            # data = server_socket.recv(BUFSIZE).decode()
+            # stdout.buffer.write(data)
+            # stdout.flush()
+
     except Exception:
         pass
     print("You are disconnected.", file=stdout)
@@ -67,11 +64,11 @@ def read_from_stdin(server_socket):
 
 # Client Runtime Behaviour - when clients successfully connected to the channel
 def channel_connected(message):
-    print(f"Welcome to chatclient, {client_username}.\n")
+    print(f"Welcome to chatclient, {client_username}.")
     if message[4:16] == "JoinSuccess:":
-        print(f"[Server Message] You have joined the channel \"{message[17:]}\".\n", file=stdout)
+        print(f"[Server Message] You have joined the channel \"{message[17:]}\".", file=stdout)
     elif message[4:12] == "InQueue:":
-        print(f"[Server Message] You are in the waiting queue and there are {message[13:]} user(s) ahead of you.\n", file=stdout)
+        print(f"[Server Message] You are in the waiting queue and there are {message[13:]} user(s) ahead of you.", file=stdout)
 
 
 # REF: The use of Event and their function set(), wait() is inspired by the code at
@@ -100,8 +97,10 @@ if __name__ == "__main__":
                 if data[:4] == "$01-":
                     channel_connected(data)
                     server_connected.set()
+                else:
+                    print(data, file=stdout)
                 # server_socket.sendall(data.encode())
         except Exception:
-            print("Error: server connection closed.\n", file=stderr)
+            print("Error: server connection closed.", file=stderr)
             os._exit(8)
     
