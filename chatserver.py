@@ -9,27 +9,27 @@ remaining_ports = -1
 BUFSIZE = 1024
 afk_time = 100
 config_filename = None
-channels = []
 channel_names = []
 channel_port = []
 channel_capacity = []
 channel_queue_length = []  # not yet implemented
+client_info = {}  # {client_username: client_socket}
 channel_users = {}  # {channel_names: [[user_1, user_2], [user_1_in_queue, user_2_in_queue]]}
 client_address_users = {}  # {client_address: [client_username, channel_name]}
 
 
 def invalid_command_line():
-    print("Usage: chatserver [afk_time] config_file\n", file=stderr)
+    print("Usage: chatserver [afk_time] config_file", file=stderr)
     exit(4)
 
 
 def invalid_file():
-    print("Error: Invalid configuration file.\n", file=stderr)
+    print("Error: Invalid configuration file.", file=stderr)
     exit(5)
 
 
 def cant_listen(port_num):
-    print(f"Error: unable to listen on port {port_num}.\n", file=stderr)
+    print(f"Error: unable to listen on port {port_num}.", file=stderr)
     exit(6)  # maybe have to wait until all unlistened port error msg are printed before exiting
 
 
@@ -86,7 +86,6 @@ def check_valid_file():
 
 
 def start_server(port_num, index):
-    global channels
     global remaining_ports
     name = channel_names[index]
     capacity = channel_capacity[index]
@@ -99,9 +98,8 @@ def start_server(port_num, index):
     except Exception:
         cant_listen(port_num)
     listening_socket.listen(5)
-    # channels.insert(index, listening_socket)
     print(f"Channel \"{name}\" is created on port {port_num}, with a capacity"
-          f" of {capacity}.\n", flush=True)
+          f" of {capacity}.", flush=True)
     remaining_ports -= 1  # tell program 1 port has been created
     create_all_ports.wait()  # wait until all ports are created to continue
     process_connections(listening_socket, index)  # generate threads per client
@@ -115,7 +113,7 @@ def duplicate_usernames(username, channel_name):
 
 # When first accepting client's connection, check for username duplicates, channel capacity,
 # queue capacity and return a message that will be sent to client
-def client_first_connection(client_username, index, client_address):
+def client_first_connection(client_username, index, client_address, client_socket):
     global channel_users
     global client_address_users
     channel_name = channel_names[index]
@@ -124,11 +122,12 @@ def client_first_connection(client_username, index, client_address):
         return f"$UserError: {channel_name}"
     # If not error, client info will be stored
     client_address_users[client_address] = [client_username, channel_name]
+    client_info[client_username] = client_socket
     capacity = channel_capacity[index]
     # Enough capacity to join successfully
     if len(channel_users[channel_name][0]) < capacity:
         channel_users[channel_name][0].append(client_username)
-        print(f"[Server Message] {client_username} has joined the channel \"{channel_name}\".\n", file=stdout)
+        print(f"[Server Message] {client_username} has joined the channel \"{channel_name}\".", file=stdout)
         return f"$01-JoinSuccess: {channel_name}"
     # Wait in queue with X users ahead
     num_users_ahead = len(channel_users[channel_name][1])
@@ -144,25 +143,43 @@ def remove_from_channel(client_username, channel_name):
     pass
 
 
+def notify_channel(channel_name, message):
+    try:
+        print(message, file=stdout)
+        for other_client_name in channel_users[channel_name][0]:
+            client_socket = client_info[other_client_name]
+            client_socket.sendall(message.encode())
+    except:
+        print("Error while handling notifying channels", file=stdout)
+
+
+# REF: The use of socket.settimeout() is inspired by the code at
+# REF: https://stackoverflow.com/questions/34371096/how-to-use-python-socket-settimeout-properly
 def handle_client(client_socket, client_address, index):
     with client_socket:
         try:
             client_socket.settimeout(afk_time)
-            while data := client_socket.recv(BUFSIZE):
-                message = data.decode()
+            while message := client_socket.recv(BUFSIZE).decode():
                 if message[:6] == "$User:":
-                    message = client_first_connection(message[7:], index, client_address)
+                    message = client_first_connection(message[7:], index, client_address, client_socket)
                     username, channel_name = client_address_users[client_address]
-                client_socket.sendall(message.encode())
-        except client_socket.timeout:
+                    client_socket.sendall(message.encode())
+                else:
+                    username, channel_name = client_address_users[client_address]
+                    to_send = f"[{username}] {message}"
+                    notify_channel(channel_name, to_send)
+        except timeout:
             # also send this to all clients in the channel
-            print(f"[Server Message] {username} went AFK in channel \"{channel_name}\".\n", file=stdout)
+            message = f"[Server Message] {username} went AFK in channel \"{channel_name}\"."
+            channel_users[channel_name][0].remove(username)
+            client_socket.close()
+            notify_channel(channel_name, message)
         except Exception:
             # close the client's connection if they abruptly close
             if message[:10] != "$UserError":
                 print(f"Connection from {username} closed.")
+            client_socket.close()  # server handles closing client's socket.
     # error or EOF - client disconnected
-    client_socket.close()  # server handles closing client's socket.
 
 
 def process_connections(listening_socket, index):
@@ -176,7 +193,7 @@ def process_connections(listening_socket, index):
 # REF: The use of os._exit() is inspired by the code at
 # REF: https://stackoverflow.com/questions/1489669/how-to-exit-the-entire-application-from-a-python-thread
 def server_shutdown():
-    print("[Server Message] Server shuts down.\n")
+    print("[Server Message] Server shuts down.")
     os._exit(0)
 
 
