@@ -57,6 +57,7 @@ def read_from_stdin(server_socket):
     try:
         while line := input():
             if line == "/quit":
+                server_socket.sendall("$Quit".encode())
                 quit()
             server_socket.send(line.encode())
             # data = server_socket.recv(BUFSIZE).decode()
@@ -105,6 +106,10 @@ if __name__ == "__main__":
                 if data[:4] == "$01-" or data[:4] == "$02-":
                     channel_connected(data, server_socket)
                     server_connected.set()
+                elif data == "[Server Message] You are removed from the channel.":
+                    server_socket.sendall("$Quit-kicked".encode())
+                    print(data, file=stdout)
+                    quit()
                 else:
                     print(data, file=stdout)
                 # server_socket.sendall(data.encode())

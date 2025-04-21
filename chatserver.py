@@ -167,8 +167,12 @@ def notify_channel(channel_name, message):
 
 
 # disconnect -> notify channel -> join room/notify users
-def disconnect_client(channel_name, username, client_socket, index):
+def disconnect_client(channel_name, username, client_socket, index, kick=False):
+    client_socket.close()
+    if kick:
+        print(f"[Server Message] Kicked {username}.")
     if client_info[username][1] == "in-channel":
+        print(channel_users[channel_name][0])
         channel_users[channel_name][0].remove(username)
         left_notification(username, channel_name)
         capacity = channel_capacity[index]
@@ -184,7 +188,6 @@ def disconnect_client(channel_name, username, client_socket, index):
     else:
         position = channel_users[channel_name][1].index(username)
         channel_users[channel_name][1].remove(username)
-    client_socket.close()
     # notify others in the queue
     for pos in range(position, len(channel_users[channel_name][1])):
         other_client_name = channel_users[channel_name][1][pos]
@@ -211,9 +214,11 @@ def handle_client(client_socket, client_address, index):
                 if message[:6] == "$User:":
                     message = client_first_connection(message[7:], index, client_address, client_socket)
                     username, channel_name = client_address_users[client_address]
-                elif message == "$Joined":
-                    pass  # client sends this after joining the channel to trigger timeout
-                else:
+                # "$Joined " to trigger timeout will be passed
+                # "$Quit" message will be passed
+                elif message == "$Quit-kicked":
+                    raise Exception()
+                elif message[0] != "$":
                     username, channel_name = client_address_users[client_address]
                     to_send = f"[{username}] {message}"
                     notify_channel(channel_name, to_send)
@@ -225,9 +230,10 @@ def handle_client(client_socket, client_address, index):
             disconnect_client(channel_name, username, client_socket, index)
         except Exception:
             # close the client's connection if they abruptly close
-            if message is None or message[:10] != "$UserError":
-                print(f"Connection from {username} closed.")
-                disconnect_client(channel_name, username, client_socket, index)
+            if message[:10] != "$UserError" or message[:5] == "$Quit":
+                kicked = True if message[6:] == "kicked" else False
+                disconnect_client(channel_name, username, client_socket, index, kick=kicked)
+            print(f"Connection from {username} closed.")
     # error or EOF - client disconnected
 
 
@@ -244,6 +250,29 @@ def process_connections(listening_socket, index):
 def server_shutdown():
     print("[Server Message] Server shuts down.")
     os._exit(0)
+
+
+def kick(command):
+    if len(command) != 3:
+        print("Usage: /kick channel_name client_username", file=stdout)
+        return
+    channel_name = command[1]
+    client_username = command[2]
+    if channel_name not in channel_names:
+        print(f"[Server Message] Channel \"{channel_name}\" does not exist.")
+        return
+    if client_username not in channel_users[channel_name][0]:
+        print(f"[Server Message] {client_username} is not in the channel.")
+        return
+    # If the command is valid, kick!
+    client_socket = client_info[client_username][0]
+    # Sending the message below will make client sends a "$Quit" message, the socket will then be disconnected
+    # handling by Exception catch in handle_client()
+    client_socket.sendall("[Server Message] You are removed from the channel.".encode())
+    # disconnect_client(channel_name, client_username, client_socket, 
+    #                   index=channel_names.index(channel_name),
+    #                   kick=True)
+
 
 
 # REF: The use of Event and their function set(), wait() is inspired by the code at
@@ -270,8 +299,11 @@ if __name__ == "__main__":
     # Main thread starts reading from stdin
     try:
         while line := input():
-            if line == "/shutdown":
+            line = line.split()
+            if line[0] == "/shutdown":
                 server_shutdown()
-    except Exception:
-        pass
+            elif line[0] == "/kick":
+                kick(line)
+    except Exception as e:
+        print(e)
     print("Server is disconnected.", file=stdout)
