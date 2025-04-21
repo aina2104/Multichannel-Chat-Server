@@ -55,7 +55,7 @@ def read_from_stdin(server_socket):
     global server_connected
     server_connected.wait()
     try:
-        while line := input():
+        for line in stdin:
             if line == "/quit":
                 server_socket.sendall("$Quit".encode())
                 quit()
@@ -63,9 +63,9 @@ def read_from_stdin(server_socket):
             # data = server_socket.recv(BUFSIZE).decode()
             # stdout.buffer.write(data)
             # stdout.flush()
-
-    except Exception:
-        pass
+    except Exception as e:
+        print("Reached Exception", file=stdout)
+        print(e, file=stdout)
     print("You are disconnected.", file=stdout)
 
 
@@ -111,7 +111,7 @@ if __name__ == "__main__":
                     print(data, file=stdout)
                     quit()
                 else:
-                    print(data, file=stdout)
+                    print(data[:-1], file=stdout)
                 # server_socket.sendall(data.encode())
         except Exception:
             print("Error: server connection closed.", file=stderr)
