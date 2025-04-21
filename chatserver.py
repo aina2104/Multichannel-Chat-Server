@@ -175,8 +175,8 @@ def disconnect_client(channel_name, username, client_socket, index):
         # check queue and notify people in the queues
         if len(channel_users[channel_name][0]) < capacity and len(channel_users[channel_name][1]) > 0:
             next_client = channel_users[channel_name][1].pop(0)
-            channel_users[channel_name][0].append(next_client)
             next_client_socket = client_info[next_client][0]
+            channel_users[channel_name][0].append(next_client)
             client_info[next_client][1] = "in-channel"
             client_join_room(next_client, channel_name, next_client_socket, code=2)
         position = 0
@@ -211,6 +211,8 @@ def handle_client(client_socket, client_address, index):
                 if message[:6] == "$User:":
                     message = client_first_connection(message[7:], index, client_address, client_socket)
                     username, channel_name = client_address_users[client_address]
+                elif message == "$Joined":
+                    pass  # client sends this after joining the channel to trigger timeout
                 else:
                     username, channel_name = client_address_users[client_address]
                     to_send = f"[{username}] {message}"

@@ -28,6 +28,10 @@ def username_error(channel_name):
     os._exit(2)
 
 
+def quit():
+    os._exit(0)
+
+
 def process_command_line():
     global client_username
     if len(argv) != 3:
@@ -52,6 +56,8 @@ def read_from_stdin(server_socket):
     server_connected.wait()
     try:
         while line := input():
+            if line == "/quit":
+                quit()
             server_socket.send(line.encode())
             # data = server_socket.recv(BUFSIZE).decode()
             # stdout.buffer.write(data)
@@ -63,11 +69,12 @@ def read_from_stdin(server_socket):
 
 
 # Client Runtime Behaviour - when clients successfully connected to the channel
-def channel_connected(message):
+def channel_connected(message, server_socket):
     if data[:4] == "$01-":
         print(f"Welcome to chatclient, {client_username}.")
     if message[4:16] == "JoinSuccess:":
         print(f"[Server Message] You have joined the channel \"{message[17:]}\".", file=stdout)
+        server_socket.sendall("$Joined".encode())
     elif message[4:12] == "InQueue:":
         print(f"[Server Message] You are in the waiting queue and there are {message[13:]} user(s) ahead of you.", file=stdout)
 
@@ -96,7 +103,7 @@ if __name__ == "__main__":
                 if data[:10] == "$UserError":
                     username_error(data[12:])
                 if data[:4] == "$01-" or data[:4] == "$02-":
-                    channel_connected(data)
+                    channel_connected(data, server_socket)
                     server_connected.set()
                 else:
                     print(data, file=stdout)
