@@ -196,13 +196,24 @@ def disconnect_client(channel_name, username, client_socket, index, kick=False):
 
 
 def timeout_notification(username, channel_name):
-    message = f"[Server Message] {username} went AFK in channel \"{channel_name}\"."
+    message = f"[Server Message] {username} went AFK in channel \"{channel_name}\".\n"
     notify_channel(channel_name, message)
 
 
 def left_notification(username, channel_name):
     left_channel_msg = f"[Server Message] {username} has left the channel."
     notify_channel(channel_name, left_channel_msg)
+
+
+def list_channels(client_socket):
+    message = ""
+    for i, channel in enumerate(channel_names):
+        port = channel_port[i]
+        capacity = channel_capacity[i]
+        current_capacity = len(channel_users[channel][0])
+        in_queue = len(channel_users[channel][1])
+        message += f"[Channel] {channel} {port} Capacity: {current_capacity}/{capacity}, Queue: {in_queue}\n"
+    client_socket.sendall(message.encode())
 
 
 # REF: The use of socket.settimeout() is inspired by the code at
@@ -218,9 +229,11 @@ def handle_client(client_socket, client_address, index):
                 # "$Quit" message will be passed
                 elif message == "$Quit-kicked":
                     raise Exception()
-                elif message[0] != "$":
+                elif message == "/list\n":
+                    list_channels(client_socket)
+                elif message[0] != "$" and message[0] != "/":
                     username, channel_name = client_address_users[client_address]
-                    to_send = f"[{username}] {message}"
+                    to_send = f"[{username}] {message}"  # to cut the last "\n" that client sent
                     notify_channel(channel_name, to_send)
                 if client_info[username][1] == "in-channel":
                     client_socket.settimeout(afk_time)
@@ -268,7 +281,7 @@ def kick(command):
     client_socket = client_info[client_username][0]
     # Sending the message below will make client sends a "$Quit" message, the socket will then be disconnected
     # handling by Exception catch in handle_client()
-    client_socket.sendall("[Server Message] You are removed from the channel.".encode())
+    client_socket.sendall("[Server Message] You are removed from the channel.\n".encode())
     # disconnect_client(channel_name, client_username, client_socket, 
     #                   index=channel_names.index(channel_name),
     #                   kick=True)
