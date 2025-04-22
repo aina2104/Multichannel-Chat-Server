@@ -148,14 +148,6 @@ def client_first_connection(client_username, index, client_address, client_socke
         notify_users_ahead(num_users_ahead, client_socket, code=1)
 
 
-# Close connection of a client from a channel, if client is in the room,
-# remove them and push any client waiting in the queue.
-# If client in the queue, remove from the queue.
-def remove_from_channel(client_username, channel_name):
-    # Only implement the queue
-    pass
-
-
 def notify_channel(channel_name, message):
     try:
         print(message, file=stdout)
@@ -164,6 +156,14 @@ def notify_channel(channel_name, message):
             client_socket.sendall(message.encode())
     except:
         print("Error while handling notifying channels", file=stdout)
+
+
+def dequeue(channel_name):
+    next_client = channel_users[channel_name][1].pop(0)
+    next_client_socket = client_info[next_client][0]
+    channel_users[channel_name][0].append(next_client)
+    client_info[next_client][1] = "in-channel"
+    client_join_room(next_client, channel_name, next_client_socket, code=2)
 
 
 # disconnect -> notify channel -> join room/notify users
@@ -178,11 +178,7 @@ def disconnect_client(channel_name, username, client_socket, index, kick=False):
         capacity = channel_capacity[index]
         # check queue and notify people in the queues
         if len(channel_users[channel_name][0]) < capacity and len(channel_users[channel_name][1]) > 0:
-            next_client = channel_users[channel_name][1].pop(0)
-            next_client_socket = client_info[next_client][0]
-            channel_users[channel_name][0].append(next_client)
-            client_info[next_client][1] = "in-channel"
-            client_join_room(next_client, channel_name, next_client_socket, code=2)
+            dequeue(channel_name)
         position = 0
     # if remove people in queue, notify the one after (find the index of the removed one)
     else:
@@ -265,14 +261,20 @@ def server_shutdown():
     os._exit(0)
 
 
+def channel_exists(channel_name):
+    if channel_name not in channel_names:
+        print(f"[Server Message] Channel \"{channel_name}\" does not exist.")
+        return False
+    return True
+
+
 def kick(command):
     if len(command) != 3:
         print("Usage: /kick channel_name client_username", file=stdout)
         return
     channel_name = command[1]
     client_username = command[2]
-    if channel_name not in channel_names:
-        print(f"[Server Message] Channel \"{channel_name}\" does not exist.")
+    if not channel_exists(channel_name):
         return
     if client_username not in channel_users[channel_name][0]:
         print(f"[Server Message] {client_username} is not in the channel.")
@@ -281,11 +283,21 @@ def kick(command):
     client_socket = client_info[client_username][0]
     # Sending the message below will make client sends a "$Quit" message, the socket will then be disconnected
     # handling by Exception catch in handle_client()
-    client_socket.sendall("[Server Message] You are removed from the channel.\n".encode())
+    client_socket.sendall("$Kick".encode())
     # disconnect_client(channel_name, client_username, client_socket, 
     #                   index=channel_names.index(channel_name),
     #                   kick=True)
 
+
+def empty(command):
+    if len(command) != 2:
+        print("Usage: /empty channel_name", file=stdout)
+    channel_name = command[1]
+    if not channel_exists(channel_name):
+        return
+    for client_username in channel_users[channel_name][0]:
+        client_socket = client_info[client_username][0]
+        client_socket.sendall("$Empty".encode())
 
 
 # REF: The use of Event and their function set(), wait() is inspired by the code at

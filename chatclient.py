@@ -80,6 +80,10 @@ def channel_connected(message, server_socket):
         print(f"[Server Message] You are in the waiting queue and there are {message[13:]} user(s) ahead of you.", file=stdout)
 
 
+def removed_message():
+    print("[Server Message] You are removed from the channel.", file=stdout)
+
+
 # REF: The use of Event and their function set(), wait() is inspired by the code at
 # REF: https://www.instructables.com/Starting-and-Stopping-Python-Threads-With-Events-i/
 if __name__ == "__main__":
@@ -106,9 +110,9 @@ if __name__ == "__main__":
                 if data[:4] == "$01-" or data[:4] == "$02-":
                     channel_connected(data, server_socket)
                     server_connected.set()
-                elif data == "[Server Message] You are removed from the channel.":
+                elif data == "$Kick":
                     server_socket.sendall("$Quit-kicked".encode())
-                    print(data, file=stdout)
+                    removed_message()
                     quit()
                 else:
                     print(data[:-1], file=stdout)
