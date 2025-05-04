@@ -160,7 +160,7 @@ def client_first_connection(client_username, index, client_address, client_socke
 
 def notify_channel(channel_name, message):
     try:
-        print(message, flush=True)
+        print(message[:-1], flush=True)
         for other_client_name in channel_users[channel_name][0]:
             client_socket = client_info[other_client_name][0]
             client_socket.sendall(message.encode())
