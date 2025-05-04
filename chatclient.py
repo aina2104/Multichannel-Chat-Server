@@ -135,6 +135,7 @@ if __name__ == "__main__":
                     print(data[:-1], flush=True)
                 # server_socket.sendall(data.encode())
         except Exception:
-            # print("Error: server connection closed.", file=stderr)
+            print("Error: server connection closed.", file=stderr)
             os._exit(8)
-    
+    print("Error: server connection closed.", file=stderr)
+    os._exit(8)
