@@ -33,6 +33,10 @@ def cant_listen(port_num):
     exit(6)  # maybe have to wait until all unlistened port error msg are printed before exiting
 
 
+def is_whitespace(command):
+    return len(command.strip()) == 0
+
+
 def process_command_line():
     global afk_time
     global config_filename
@@ -47,7 +51,7 @@ def process_command_line():
         config_filename = argv[2]
     else:
         config_filename = argv[1]
-    if config_filename == "":
+    if is_whitespace(config_filename):
         invalid_command_line()
 
 
@@ -81,6 +85,9 @@ def check_valid_file():
     except Exception:
         # print(e)  # only for testing
         invalid_file()
+    if not config_file.readline():
+        invalid_file()
+    config_file.seek(0)
     for line in config_file:
         check_file_format(line.strip().split())
 
@@ -155,15 +162,17 @@ def notify_channel(channel_name, message):
             client_socket = client_info[other_client_name][0]
             client_socket.sendall(message.encode())
     except:
-        print("Error while handling notifying channels", file=stdout)
+        # print("Error while handling notifying channels", file=stdout)
+        pass
 
 
 def dequeue(channel_name):
-    next_client = channel_users[channel_name][1].pop(0)
-    next_client_socket = client_info[next_client][0]
-    channel_users[channel_name][0].append(next_client)
-    client_info[next_client][1] = "in-channel"
-    client_join_room(next_client, channel_name, next_client_socket, code=2)
+    next_client = channel_users[channel_name][1].pop(0)  # remove first client's name in the queue
+    next_client_socket = client_info[next_client][0]  # get their socket
+    channel_users[channel_name][0].append(next_client)  # add them to the room
+    # print(f"Dequeue, users in the room now: {channel_users[channel_name][0]}")
+    client_info[next_client][1] = "in-channel"  # set their status "in-channel"
+    client_join_room(next_client, channel_name, next_client_socket, code=2)  # server and joined client will print msg to the terminal
 
 
 # disconnect -> notify channel -> join room/notify users
@@ -172,8 +181,8 @@ def disconnect_client(channel_name, username, client_socket, index, kick=False):
     if kick:
         print(f"[Server Message] Kicked {username}.")
     if client_info[username][1] == "in-channel":
-        print(channel_users[channel_name][0])
-        channel_users[channel_name][0].remove(username)
+        # print(channel_users[channel_name][0])  # print list of clients in the room
+        channel_users[channel_name][0].remove(username) # remove a specific client in the room
         left_notification(username, channel_name)
         capacity = channel_capacity[index]
         # check queue and notify people in the queues
@@ -218,11 +227,10 @@ def handle_client(client_socket, client_address, index):
     with client_socket:
         try:
             while message := client_socket.recv(BUFSIZE).decode():
+                # print(f"Message at client_socket: {message}", file=stdout)
                 if message[:6] == "$User:":
                     message = client_first_connection(message[7:], index, client_address, client_socket)
                     username, channel_name = client_address_users[client_address]
-                # "$Joined " to trigger timeout will be passed
-                # "$Quit" message will be passed
                 elif message == "$Quit-kicked":
                     raise Exception()
                 elif message == "/list\n":
@@ -233,16 +241,19 @@ def handle_client(client_socket, client_address, index):
                     notify_channel(channel_name, to_send)
                 if client_info[username][1] == "in-channel":
                     client_socket.settimeout(afk_time)
-        except timeout:
+        except TimeoutError:
             # also send this to all clients in the channel
             timeout_notification(username, channel_name)
+            client_socket.sendall("$AFK".encode())
             disconnect_client(channel_name, username, client_socket, index)
         except Exception:
+            # print(f"Message at Exception: {message}", file=stdout)
             # close the client's connection if they abruptly close
             if message[:10] != "$UserError" or message[:5] == "$Quit":
+                # print("Handle exception")
                 kicked = True if message[6:] == "kicked" else False
                 disconnect_client(channel_name, username, client_socket, index, kick=kicked)
-            print(f"Connection from {username} closed.")
+            # print(f"Connection from {username} closed.")
     # error or EOF - client disconnected
 
 
@@ -298,6 +309,12 @@ def empty(command):
     for client_username in channel_users[channel_name][0]:
         client_socket = client_info[client_username][0]
         client_socket.sendall("$Empty".encode())
+        client_socket.close()
+    print(f"[Server Message] \"{channel_name}\" has been emptied.", file=stdout)
+    channel_users[channel_name][0] = []
+    capacity = channel_capacity[channel_names.index(channel_name)]
+    while len(channel_users[channel_name][0]) < capacity and len(channel_users[channel_name][1]) > 0:
+        dequeue(channel_name)
 
 
 # REF: The use of Event and their function set(), wait() is inspired by the code at
@@ -305,9 +322,9 @@ def empty(command):
 if __name__ == "__main__":
     process_command_line()
     check_valid_file()
-    print(channel_names)
-    print(channel_port)
-    print(channel_capacity)
+    # print(channel_names)
+    # print(channel_port)
+    # print(channel_capacity)
     remaining_ports = len(channel_port)  # will be decrement to check finished port
     channels = [None] * remaining_ports  # store the socket object?
     listening_threads = [None] * remaining_ports  # don't think I need this
@@ -329,6 +346,9 @@ if __name__ == "__main__":
                 server_shutdown()
             elif line[0] == "/kick":
                 kick(line)
+            elif line[0] == "/empty":
+                empty(line)
     except Exception as e:
-        print(e)
-    print("Server is disconnected.", file=stdout)
+        # print(e)
+        pass
+    # print("Server is disconnected.", file=stdout)
