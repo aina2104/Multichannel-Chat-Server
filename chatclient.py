@@ -8,6 +8,7 @@ BUFSIZE = 1024
 port_number = None
 client_username = None
 server_connected = None
+exit_status = Event()
 
 
 def invalid_command_line():
@@ -23,8 +24,7 @@ def cant_connect(port_num):
 # REF: The use of os._exit() is inspired by the code at
 # REF: https://stackoverflow.com/questions/1489669/how-to-exit-the-entire-application-from-a-python-thread
 def username_error(channel_name):
-    print(f"[Server Message] Channel \"{channel_name}\" already has user "
-          f"{client_username}.", file=stdout)
+    print(f"[Server Message] Channel \"{channel_name}\" already has user {client_username}.", file=stdout)
     os._exit(2)
 
 
@@ -60,8 +60,10 @@ def read_from_stdin(server_socket):
     server_connected.wait()
     try:
         for line in stdin:
-            if line == "/quit":
-                server_socket.sendall("$Quit".encode())
+            if line == "/quit\n":
+                server_socket.send("$Quit".encode())
+                quit()
+            if line == "/k\n":
                 quit()
             server_socket.send(line.encode())
             # data = server_socket.recv(BUFSIZE).decode()
@@ -79,14 +81,14 @@ def channel_connected(message, server_socket):
     if data[:4] == "$01-":
         print(f"Welcome to chatclient, {client_username}.")
     if message[4:16] == "JoinSuccess:":
-        print(f"[Server Message] You have joined the channel \"{message[17:]}\".", file=stdout)
+        print(f"[Server Message] You have joined the channel \"{message[17:]}\".", flush=True)
         server_socket.sendall("$Joined".encode())
     elif message[4:12] == "InQueue:":
-        print(f"[Server Message] You are in the waiting queue and there are {message[13:]} user(s) ahead of you.", file=stdout)
+        print(f"[Server Message] You are in the waiting queue and there are {message[13:]} user(s) ahead of you.", flush=True)
 
 
 def removed(server_socket):
-    print("[Server Message] You are removed from the channel.", file=stdout)
+    print("[Server Message] You are removed from the channel.", flush=True)
     server_socket.close()
     quit()
 
@@ -130,7 +132,7 @@ if __name__ == "__main__":
                 elif data == "$AFK":
                     quit()
                 else:
-                    print(data[:-1], file=stdout)
+                    print(data[:-1], flush=True)
                 # server_socket.sendall(data.encode())
         except Exception:
             # print("Error: server connection closed.", file=stderr)
