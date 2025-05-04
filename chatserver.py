@@ -275,8 +275,11 @@ def process_connections(listening_socket, index):
 
 # REF: The use of os._exit() is inspired by the code at
 # REF: https://stackoverflow.com/questions/1489669/how-to-exit-the-entire-application-from-a-python-thread
-def server_shutdown():
-    print("[Server Message] Server shuts down.")
+def server_shutdown(command):
+    if command != "/shutdown":
+        print("Usage: /shutdown", flush=True)
+        return
+    print("[Server Message] Server shuts down.", flush=True)
     os._exit(0)
 
 
@@ -288,6 +291,7 @@ def channel_exists(channel_name):
 
 
 def kick(command):
+    command = command.split()
     if len(command) != 3:
         print("Usage: /kick channel_name client_username", flush=True)
         return
@@ -309,6 +313,7 @@ def kick(command):
 
 
 def empty(command):
+    command = command.split()
     if len(command) != 2:
         print("Usage: /empty channel_name", flush=True)
     channel_name = command[1]
@@ -349,12 +354,11 @@ if __name__ == "__main__":
     # Main thread starts reading from stdin
     try:
         while line := input():
-            line = line.split()
-            if line[0] == "/shutdown":
-                server_shutdown()
-            elif line[0] == "/kick":
+            if line[:9] == "/shutdown":
+                server_shutdown(line)
+            elif line[:5] == "/kick":
                 kick(line)
-            elif line[0] == "/empty":
+            elif line[:6] == "/empty":
                 empty(line)
     except Exception as e:
         # print(e)
