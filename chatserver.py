@@ -1,9 +1,10 @@
 from sys import argv, stderr, stdout, stdin, exit
 from socket import *
-from threading import Event, Thread, current_thread
+from threading import Event, Thread, Lock, current_thread
 from time import sleep
 import os
 
+lock = Lock()
 create_all_ports = Event()
 remaining_ports = -1
 BUFSIZE = 1024
@@ -120,7 +121,7 @@ def duplicate_usernames(username, channel_name):
 
 # Print to server, send message to client for them to print
 def client_join_room(client_username, channel_name, client_socket, code):
-    print(f"[Server Message] {client_username} has joined the channel \"{channel_name}\".", file=stdout)
+    print(f"[Server Message] {client_username} has joined the channel \"{channel_name}\".", flush=True)
     message = f"$0{code}-JoinSuccess: {channel_name}"
     client_socket.sendall(message.encode())
 
@@ -133,31 +134,33 @@ def notify_users_ahead(num_users_ahead, client_socket, code):
 # When first accepting client's connection, check for username duplicates, channel capacity,
 # queue capacity and return a message that will be sent to client
 def client_first_connection(client_username, index, client_address, client_socket):
-    global channel_users
-    global client_address_users
-    channel_name = channel_names[index]
-    # Name duplicates
-    if duplicate_usernames(client_username, channel_name):
-        return f"$UserError: {channel_name}"
-    # If not error, client info will be stored
-    client_address_users[client_address] = [client_username, channel_name]
-    capacity = channel_capacity[index]
-    # Enough capacity to join successfully
-    if len(channel_users[channel_name][0]) < capacity:
-        channel_users[channel_name][0].append(client_username)
-        client_info[client_username] = [client_socket, "in-channel"]
-        client_join_room(client_username, channel_name, client_socket, code=1)
-    # Wait in queue with X users ahead
-    else:
-        num_users_ahead = len(channel_users[channel_name][1])
-        channel_users[channel_name][1].append(client_username)
-        client_info[client_username] = [client_socket, "in-queue"]
-        notify_users_ahead(num_users_ahead, client_socket, code=1)
+    with lock:
+        global channel_users
+        global client_address_users
+        channel_name = channel_names[index]
+        # Name duplicates
+        if duplicate_usernames(client_username, channel_name):
+            client_socket.sendall(f"$UserError: {channel_name}".encode())
+            return
+        # If not error, client info will be stored
+        client_address_users[client_address] = [client_username, channel_name]
+        capacity = channel_capacity[index]
+        # Enough capacity to join successfully
+        if len(channel_users[channel_name][0]) < capacity:
+            client_join_room(client_username, channel_name, client_socket, code=1)
+            channel_users[channel_name][0].append(client_username)
+            client_info[client_username] = [client_socket, "in-channel"]
+        # Wait in queue with X users ahead
+        else:
+            num_users_ahead = len(channel_users[channel_name][1])
+            channel_users[channel_name][1].append(client_username)
+            client_info[client_username] = [client_socket, "in-queue"]
+            notify_users_ahead(num_users_ahead, client_socket, code=1)
 
 
 def notify_channel(channel_name, message):
     try:
-        print(message, file=stdout)
+        print(message, flush=True)
         for other_client_name in channel_users[channel_name][0]:
             client_socket = client_info[other_client_name][0]
             client_socket.sendall(message.encode())
@@ -177,27 +180,28 @@ def dequeue(channel_name):
 
 # disconnect -> notify channel -> join room/notify users
 def disconnect_client(channel_name, username, client_socket, index, kick=False):
-    client_socket.close()
-    if kick:
-        print(f"[Server Message] Kicked {username}.")
-    if client_info[username][1] == "in-channel":
-        # print(channel_users[channel_name][0])  # print list of clients in the room
-        channel_users[channel_name][0].remove(username) # remove a specific client in the room
-        left_notification(username, channel_name)
-        capacity = channel_capacity[index]
-        # check queue and notify people in the queues
-        if len(channel_users[channel_name][0]) < capacity and len(channel_users[channel_name][1]) > 0:
-            dequeue(channel_name)
-        position = 0
-    # if remove people in queue, notify the one after (find the index of the removed one)
-    else:
-        position = channel_users[channel_name][1].index(username)
-        channel_users[channel_name][1].remove(username)
-    # notify others in the queue
-    for pos in range(position, len(channel_users[channel_name][1])):
-        other_client_name = channel_users[channel_name][1][pos]
-        other_client_socket = client_info[other_client_name][0]
-        notify_users_ahead(pos, other_client_socket, code=2)
+    with lock:
+        client_socket.close()
+        if kick:
+            print(f"[Server Message] Kicked {username}.")
+        if client_info[username][1] == "in-channel":
+            # print(channel_users[channel_name][0])  # print list of clients in the room
+            channel_users[channel_name][0].remove(username) # remove a specific client in the room
+            left_notification(username, channel_name)
+            capacity = channel_capacity[index]
+            # check queue and notify people in the queues
+            if len(channel_users[channel_name][0]) < capacity and len(channel_users[channel_name][1]) > 0:
+                dequeue(channel_name)
+            position = 0
+        # if remove people in queue, notify the one after (find the index of the removed one)
+        else:
+            position = channel_users[channel_name][1].index(username)
+            channel_users[channel_name][1].remove(username)
+        # notify others in the queue
+        for pos in range(position, len(channel_users[channel_name][1])):
+            other_client_name = channel_users[channel_name][1][pos]
+            other_client_socket = client_info[other_client_name][0]
+            notify_users_ahead(pos, other_client_socket, code=2)
 
 
 def timeout_notification(username, channel_name):
@@ -229,10 +233,12 @@ def handle_client(client_socket, client_address, index):
             while message := client_socket.recv(BUFSIZE).decode():
                 # print(f"Message at client_socket: {message}", file=stdout)
                 if message[:6] == "$User:":
-                    message = client_first_connection(message[7:], index, client_address, client_socket)
-                    username, channel_name = client_address_users[client_address]
-                elif message == "$Quit-kicked":
-                    raise Exception()
+                    username = message[7:]
+                    channel_name = channel_names[index]
+                    client_first_connection(message[7:], index, client_address, client_socket)
+                elif message[:5] == "$Quit":
+                    kicked = True if message[6:] == "kicked" else False
+                    disconnect_client(channel_name, username, client_socket, index, kick=kicked)
                 elif message == "/list\n":
                     list_channels(client_socket)
                 elif message[0] != "$" and message[0] != "/":
@@ -249,10 +255,11 @@ def handle_client(client_socket, client_address, index):
         except Exception:
             # print(f"Message at Exception: {message}", file=stdout)
             # close the client's connection if they abruptly close
-            if message[:10] != "$UserError" or message[:5] == "$Quit":
-                # print("Handle exception")
-                kicked = True if message[6:] == "kicked" else False
-                disconnect_client(channel_name, username, client_socket, index, kick=kicked)
+            # if message[:5] != "$User" or message[:5] == "$Quit":
+            # if message[:5] == "$Quit":
+            #     # print("Handle exception")
+            #     kicked = True if message[6:] == "kicked" else False
+            disconnect_client(channel_name, username, client_socket, index, kick=False)
             # print(f"Connection from {username} closed.")
     # error or EOF - client disconnected
 
@@ -281,7 +288,7 @@ def channel_exists(channel_name):
 
 def kick(command):
     if len(command) != 3:
-        print("Usage: /kick channel_name client_username", file=stdout)
+        print("Usage: /kick channel_name client_username", flush=True)
         return
     channel_name = command[1]
     client_username = command[2]
@@ -302,7 +309,7 @@ def kick(command):
 
 def empty(command):
     if len(command) != 2:
-        print("Usage: /empty channel_name", file=stdout)
+        print("Usage: /empty channel_name", flush=True)
     channel_name = command[1]
     if not channel_exists(channel_name):
         return
@@ -310,7 +317,7 @@ def empty(command):
         client_socket = client_info[client_username][0]
         client_socket.sendall("$Empty".encode())
         client_socket.close()
-    print(f"[Server Message] \"{channel_name}\" has been emptied.", file=stdout)
+    print(f"[Server Message] \"{channel_name}\" has been emptied.", flush=True)
     channel_users[channel_name][0] = []
     capacity = channel_capacity[channel_names.index(channel_name)]
     while len(channel_users[channel_name][0]) < capacity and len(channel_users[channel_name][1]) > 0:
