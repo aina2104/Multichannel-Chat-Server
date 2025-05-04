@@ -160,7 +160,7 @@ def client_first_connection(client_username, index, client_address, client_socke
 
 def notify_channel(channel_name, message):
     try:
-        print(message, flush=True)
+        print(message[:-1], flush=True)
         for other_client_name in channel_users[channel_name][0]:
             client_socket = client_info[other_client_name][0]
             client_socket.sendall(message.encode())
@@ -179,7 +179,7 @@ def dequeue(channel_name):
 
 
 # disconnect -> notify channel -> join room/notify users
-def disconnect_client(channel_name, username, client_socket, index, kick=False):
+def disconnect_client(channel_name, username, client_socket, index, kick=False, AFK=False):
     with lock:
         client_socket.close()
         if kick:
@@ -187,7 +187,8 @@ def disconnect_client(channel_name, username, client_socket, index, kick=False):
         if client_info[username][1] == "in-channel":
             # print(channel_users[channel_name][0])  # print list of clients in the room
             channel_users[channel_name][0].remove(username) # remove a specific client in the room
-            left_notification(username, channel_name)
+            if not AFK:
+                left_notification(username, channel_name)
             capacity = channel_capacity[index]
             # check queue and notify people in the queues
             if len(channel_users[channel_name][0]) < capacity and len(channel_users[channel_name][1]) > 0:
@@ -251,7 +252,7 @@ def handle_client(client_socket, client_address, index):
             # also send this to all clients in the channel
             timeout_notification(username, channel_name)
             client_socket.sendall("$AFK".encode())
-            disconnect_client(channel_name, username, client_socket, index)
+            disconnect_client(channel_name, username, client_socket, index, AFK=True)
         except Exception:
             # print(f"Message at Exception: {message}", file=stdout)
             # close the client's connection if they abruptly close

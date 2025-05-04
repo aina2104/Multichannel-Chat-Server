@@ -131,7 +131,7 @@ if __name__ == "__main__":
                     removed(server_socket)
                 elif data == "$AFK":
                     quit()
-                else:
+                elif data[0] != "$":
                     print(data[:-1], flush=True)
                 # server_socket.sendall(data.encode())
         except Exception:
