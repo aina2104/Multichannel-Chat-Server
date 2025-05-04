@@ -16,7 +16,7 @@ def invalid_command_line():
 
 
 def cant_connect(port_num):
-    print(f"Error: Unable to connect to port {port_num}.")
+    print(f"Error: Unable to connect to port {port_num}.", file=stderr)
     exit(7)
 
 
@@ -32,11 +32,15 @@ def quit():
     os._exit(0)
 
 
+def is_whitespace(command):
+    return len(command.strip()) == 0 or " " in command
+
+
 def process_command_line():
     global client_username
     if len(argv) != 3:
         invalid_command_line()
-    if argv[1] == "" or argv[2] == "":
+    if is_whitespace(argv[1]) or is_whitespace(argv[2]):
         invalid_command_line()
     client_username = argv[2]
 
@@ -47,7 +51,7 @@ def port_checking():
         cant_connect(argv[1])
     port_number = int(argv[1])
     if port_number < 1024 or port_number > 65535:
-        cant_connect(port_number)
+        cant_connect(argv[1])
 
 
 # A 2nd thread to continuously read data sent from server
@@ -64,9 +68,10 @@ def read_from_stdin(server_socket):
             # stdout.buffer.write(data)
             # stdout.flush()
     except Exception as e:
-        print("Reached Exception", file=stdout)
-        print(e, file=stdout)
-    print("You are disconnected.", file=stdout)
+        # print("Reached Exception", file=stdout)
+        # print(e, file=stdout)
+        pass
+    # print("You are disconnected.", file=stdout)
 
 
 # Client Runtime Behaviour - when clients successfully connected to the channel
@@ -80,8 +85,10 @@ def channel_connected(message, server_socket):
         print(f"[Server Message] You are in the waiting queue and there are {message[13:]} user(s) ahead of you.", file=stdout)
 
 
-def removed_message():
+def removed(server_socket):
     print("[Server Message] You are removed from the channel.", file=stdout)
+    server_socket.close()
+    quit()
 
 
 # REF: The use of Event and their function set(), wait() is inspired by the code at
@@ -90,7 +97,8 @@ if __name__ == "__main__":
     process_command_line()
     port_checking()
     server_connected = Event()
-    # Main thread to read from stdin
+    
+    # Connect to server
     server_socket = socket(AF_INET, SOCK_STREAM)
     try:
         server_socket.connect(('localhost', port_number))
@@ -99,9 +107,12 @@ if __name__ == "__main__":
         server_socket.send(user_msg.encode())
     except Exception:
         cant_connect(port_number)
+
+    # A thread to read from stdin
     server_thread = Thread(target=read_from_stdin, args=(server_socket,))
     server_thread.start()
 
+    # Main thread to read from server
     with server_socket:
         try:
             while data := server_socket.recv(BUFSIZE).decode():
@@ -112,12 +123,16 @@ if __name__ == "__main__":
                     server_connected.set()
                 elif data == "$Kick":
                     server_socket.sendall("$Quit-kicked".encode())
-                    removed_message()
+                    removed(server_socket)
+                elif data == "$Empty":
+                    # server_socket.sendall(data.encode())
+                    removed(server_socket)
+                elif data == "$AFK":
                     quit()
                 else:
                     print(data[:-1], file=stdout)
                 # server_socket.sendall(data.encode())
         except Exception:
-            print("Error: server connection closed.", file=stderr)
+            # print("Error: server connection closed.", file=stderr)
             os._exit(8)
     
