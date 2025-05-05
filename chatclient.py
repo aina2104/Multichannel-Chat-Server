@@ -54,6 +54,14 @@ def port_checking():
         cant_connect(argv[1])
 
 
+def check_command_list(command, server_socket):
+    if command != "/list\n":
+        # print("[Server Message] Usage: /list", flush=True)
+        stdout.write("[Server Message] Usage: /list\n")
+        stdout.flush()
+    else:
+        server_socket.send("$List\n".encode())
+
 # A 2nd thread to continuously read data sent from server
 def read_from_stdin(server_socket):
     global server_connected
@@ -61,11 +69,14 @@ def read_from_stdin(server_socket):
     try:
         for line in stdin:
             if line == "/quit\n":
-                server_socket.send("$Quit".encode())
+                server_socket.send("$Quit\n".encode())
                 quit()
-            if line == "/k\n":
+            elif line == "/k\n":
                 quit()
-            server_socket.send(line.encode())
+            elif line[:5] == "/list":
+                check_command_list(line, server_socket)
+            elif line[0] != "/" and line[0] != "$":
+                server_socket.send(line.encode())
             # data = server_socket.recv(BUFSIZE).decode()
             # stdout.buffer.write(data)
             # stdout.flush()
@@ -81,14 +92,20 @@ def channel_connected(message, server_socket):
     if data[:4] == "$01-":
         print(f"Welcome to chatclient, {client_username}.")
     if message[4:16] == "JoinSuccess:":
-        print(f"[Server Message] You have joined the channel \"{message[17:]}\".", flush=True)
-        server_socket.sendall("$Joined".encode())
+        stdout.write(f"[Server Message] You have joined the channel \"{message[17:]}\".\n")
+        stdout.flush()
+        # print(f"[Server Message] You have joined the channel \"{message[17:]}\".", flush=True)
+        server_socket.sendall("$Joined\n".encode())
     elif message[4:12] == "InQueue:":
-        print(f"[Server Message] You are in the waiting queue and there are {message[13:]} user(s) ahead of you.", flush=True)
+        # print(f"[Server Message] You are in the waiting queue and there are {message[13:]} user(s) ahead of you.", flush=True)
+        stdout.write(f"[Server Message] You are in the waiting queue and there are {message[13:]} user(s) ahead of you.\n")
+        stdout.flush()
 
 
 def removed(server_socket):
-    print("[Server Message] You are removed from the channel.", flush=True)
+    # print("[Server Message] You are removed from the channel.", flush=True)
+    stdout.write("[Server Message] You are removed from the channel.\n")
+    stdout.flush()
     server_socket.close()
     quit()
 
@@ -105,7 +122,7 @@ if __name__ == "__main__":
     try:
         server_socket.connect(('localhost', port_number))
         # as soon as connections accepted, send server the username
-        user_msg = f"$User: {client_username}"
+        user_msg = f"$User: {client_username}\n"
         server_socket.send(user_msg.encode())
     except Exception:
         cant_connect(port_number)
@@ -124,7 +141,7 @@ if __name__ == "__main__":
                     channel_connected(data, server_socket)
                     server_connected.set()
                 elif data == "$Kick":
-                    server_socket.sendall("$Quit-kicked".encode())
+                    server_socket.sendall("$Quit-kicked\n".encode())
                     removed(server_socket)
                 elif data == "$Empty":
                     # server_socket.sendall(data.encode())
@@ -132,7 +149,9 @@ if __name__ == "__main__":
                 elif data == "$AFK":
                     quit()
                 elif data[0] != "$":
-                    print(data[:-1], flush=True)
+                    # print(data[:-1], flush=True)
+                    stdout.write(data)
+                    stdout.flush()
                 # server_socket.sendall(data.encode())
         except Exception:
             print("Error: server connection closed.", file=stderr)
