@@ -1,1 +1,1 @@
-channel channel_1 4567 2
+channel channel_1 4567 1
