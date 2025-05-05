@@ -123,12 +123,12 @@ def duplicate_usernames(username, channel_name):
 def client_join_room(client_username, channel_name, client_socket, code):
     stdout.write(f"[Server Message] {client_username} has joined the channel \"{channel_name}\".\n")
     stdout.flush()
-    message = f"$0{code}-JoinSuccess: {channel_name}"
+    message = f"$0{code}-JoinSuccess: {channel_name}\n"
     client_socket.sendall(message.encode())
 
 
 def notify_users_ahead(num_users_ahead, client_socket, code):
-    message = f"$0{code}-InQueue: {num_users_ahead}"
+    message = f"$0{code}-InQueue: {num_users_ahead}\n"
     client_socket.sendall(message.encode())
 
 
@@ -140,7 +140,7 @@ def client_first_connection(client_username, index, client_address, client_socke
     channel_name = channel_names[index]
     # Name duplicates
     if duplicate_usernames(client_username, channel_name):
-        client_socket.sendall(f"$UserError: {channel_name}".encode())
+        client_socket.sendall(f"$UserError: {channel_name}\n".encode())
         return
     # If not error, client info will be stored
     client_address_users[client_address] = [client_username, channel_name]
@@ -251,14 +251,14 @@ def handle_client(client_socket, client_address, index):
                             list_channels(client_socket)
                         elif message[0] != "$" and message[0] != "/":
                             username, channel_name = client_address_users[client_address]
-                            to_send = f"[{username}] {message}"
+                            to_send = f"[{username}] {message}" # message already includes \n
                             notify_channel(channel_name, to_send)
                         if client_info[username][1] == "in-channel":
                             client_socket.settimeout(afk_time)
         except TimeoutError:
             # also send this to all clients in the channel
             timeout_notification(username, channel_name)
-            client_socket.sendall("$AFK".encode())
+            client_socket.sendall("$AFK\n".encode())
             disconnect_client(channel_name, username, client_socket, index, AFK=True)
         except Exception:
             # print(f"Message at Exception: {message}", file=stdout)
@@ -283,7 +283,7 @@ def process_connections(listening_socket, index):
 # REF: The use of os._exit() is inspired by the code at
 # REF: https://stackoverflow.com/questions/1489669/how-to-exit-the-entire-application-from-a-python-thread
 def server_shutdown(command):
-    if command != "/shutdown":
+    if not (command == "/shutdown" or command == "\n"):
         stdout.write("Usage: /shutdown\n")
         stdout.flush()
         return
@@ -318,7 +318,7 @@ def kick(orig_command):
     client_socket = client_info[client_username][0]
     # Sending the message below will make client sends a "$Quit" message, the socket will then be disconnected
     # handling by Exception catch in handle_client() - maybe should not do this
-    client_socket.sendall("$Kick".encode())
+    client_socket.sendall("$Kick\n".encode())
     # disconnect_client(channel_name, client_username, client_socket, 
     #                   index=channel_names.index(channel_name),
     #                   kick=True)
@@ -334,7 +334,7 @@ def empty(command):
         return
     for client_username in channel_users[channel_name][0]:
         client_socket = client_info[client_username][0]
-        client_socket.sendall("$Empty".encode())
+        client_socket.sendall("$Empty\n".encode())
         client_socket.close()
     stdout.write(f"[Server Message] \"{channel_name}\" has been emptied.\n")
     stdout.flush()
@@ -369,7 +369,7 @@ if __name__ == "__main__":
     # Main thread starts reading from stdin
     try:
         while line := input():
-            if line[:9] == "/shutdown":
+            if line == "\n" or line[:9] == "/shutdown":
                 server_shutdown(line)
             elif line[:5] == "/kick":
                 kick(line)
