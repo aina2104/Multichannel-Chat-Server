@@ -24,7 +24,8 @@ def cant_connect(port_num):
 # REF: The use of os._exit() is inspired by the code at
 # REF: https://stackoverflow.com/questions/1489669/how-to-exit-the-entire-application-from-a-python-thread
 def username_error(channel_name):
-    print(f"[Server Message] Channel \"{channel_name}\" already has user {client_username}.", file=stdout)
+    stdout.write(f"[Server Message] Channel \"{channel_name}\" already has user {client_username}.\n")
+    stdout.flush()
     os._exit(2)
 
 
@@ -56,7 +57,6 @@ def port_checking():
 
 def check_command_list(command, server_socket):
     if command != "/list\n":
-        # print("[Server Message] Usage: /list", flush=True)
         stdout.write("[Server Message] Usage: /list\n")
         stdout.flush()
     else:
@@ -68,7 +68,7 @@ def read_from_stdin(server_socket):
     server_connected.wait()
     try:
         for line in stdin:
-            if line == "/quit\n":
+            if line == "\n" or line == "/quit\n":
                 server_socket.send("$Quit\n".encode())
                 quit()
             elif line == "/k\n":
@@ -94,16 +94,13 @@ def channel_connected(message, server_socket):
     if message[4:16] == "JoinSuccess:":
         stdout.write(f"[Server Message] You have joined the channel \"{message[17:]}\".\n")
         stdout.flush()
-        # print(f"[Server Message] You have joined the channel \"{message[17:]}\".", flush=True)
         server_socket.sendall("$Joined\n".encode())
     elif message[4:12] == "InQueue:":
-        # print(f"[Server Message] You are in the waiting queue and there are {message[13:]} user(s) ahead of you.", flush=True)
         stdout.write(f"[Server Message] You are in the waiting queue and there are {message[13:]} user(s) ahead of you.\n")
         stdout.flush()
 
 
 def removed(server_socket):
-    # print("[Server Message] You are removed from the channel.", flush=True)
     stdout.write("[Server Message] You are removed from the channel.\n")
     stdout.flush()
     server_socket.close()
@@ -134,25 +131,28 @@ if __name__ == "__main__":
     # Main thread to read from server
     with server_socket:
         try:
-            while data := server_socket.recv(BUFSIZE).decode():
-                if data[:10] == "$UserError":
-                    username_error(data[12:])
-                if data[:4] == "$01-" or data[:4] == "$02-":
-                    channel_connected(data, server_socket)
-                    server_connected.set()
-                elif data == "$Kick":
-                    server_socket.sendall("$Quit-kicked\n".encode())
-                    removed(server_socket)
-                elif data == "$Empty":
+            while message := server_socket.recv(BUFSIZE).decode():
+                while "\n" in message:
+                    newline_index = message.index("\n")
+                    data = message[:(newline_index+1)]
+                    message = message[(newline_index+1):]
+                    if data[:10] == "$UserError":
+                        username_error(data[:-1][12:])
+                    if data[:4] == "$01-" or data[:4] == "$02-":
+                        channel_connected(data[:-1], server_socket)
+                        server_connected.set()
+                    elif data == "$Kick\n":
+                        server_socket.sendall("$Quit-kicked\n".encode())
+                        removed(server_socket)
+                    elif data == "$Empty\n":
+                        # server_socket.sendall(data.encode())
+                        removed(server_socket)
+                    elif data == "$AFK\n":
+                        quit()
+                    elif data[0] != "$":
+                        stdout.write(data[:-1])
+                        stdout.flush()
                     # server_socket.sendall(data.encode())
-                    removed(server_socket)
-                elif data == "$AFK":
-                    quit()
-                elif data[0] != "$":
-                    # print(data[:-1], flush=True)
-                    stdout.write(data)
-                    stdout.flush()
-                # server_socket.sendall(data.encode())
         except Exception:
             print("Error: server connection closed.", file=stderr)
             os._exit(8)
