@@ -290,9 +290,9 @@ def channel_exists(channel_name):
     return True
 
 
-def kick(command):
-    command = command.split()
-    if len(command) != 3:
+def kick(orig_command):
+    command = orig_command.split()
+    if len(command) != 3 or orig_command.count(" ") > 2:
         print("Usage: /kick channel_name client_username", flush=True)
         return
     channel_name = command[1]
