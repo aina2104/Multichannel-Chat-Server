@@ -142,7 +142,7 @@ def client_first_connection(client_username, index, client_address, client_socke
     # Name duplicates
     if duplicate_usernames(client_username, channel_name):
         client_socket.sendall(f"$UserError: {channel_name}\n".encode())
-        return
+        return False
     # If not error, client info will be stored
     client_address_users[client_address] = [client_username, channel_name]
     capacity = channel_capacity[index]
@@ -157,6 +157,7 @@ def client_first_connection(client_username, index, client_address, client_socke
         channel_users[channel_name][1].append(client_username)
         client_info[client_username] = [client_socket, "in-queue"]
         notify_users_ahead(num_users_ahead, client_socket, code=1)
+    return True
 
 
 def notify_channel(channel_name, message, kick=False):
@@ -237,6 +238,7 @@ def list_channels(client_socket):
 # REF: The use of socket.settimeout() is inspired by the code at
 # REF: https://stackoverflow.com/questions/34371096/how-to-use-python-socket-settimeout-properly
 def handle_client(client_socket, client_address, index):
+    duplication = False
     with client_socket:
         try:
             while data := client_socket.recv(BUFSIZE).decode():
@@ -249,7 +251,8 @@ def handle_client(client_socket, client_address, index):
                         if message[:6] == "$User:":
                             username = message[:-1][7:]
                             channel_name = channel_names[index]
-                            client_first_connection(message[:-1][7:], index, client_address, client_socket)
+                            if not client_first_connection(message[:-1][7:], index, client_address, client_socket):
+                                duplication = True
                         elif message[:5] == "$Quit":
                             kicked = True if message[:-1][6:] == "kicked" else False
                             disconnect_client(channel_name, username, client_socket, index, kick=kicked)
@@ -273,7 +276,10 @@ def handle_client(client_socket, client_address, index):
                 disconnect_client(channel_name, username, client_socket, index, kick=False)
             # print(f"Connection from {username} closed.")
     # error or EOF - client disconnected
-    disconnect_client(channel_name, username, client_socket, index, kick=False)  # abruptly closed
+    if duplication:
+        client_socket.close()
+    else:
+        disconnect_client(channel_name, username, client_socket, index, kick=False)  # abruptly closed
 
 
 def process_connections(listening_socket, index):
