@@ -5,6 +5,7 @@ from time import sleep
 import os
 
 lock = Lock()
+disconnect_client_lock = Lock()
 create_all_ports = Event()
 remaining_ports = -1
 BUFSIZE = 1024
@@ -172,12 +173,13 @@ def notify_channel(channel_name, message, kick=False):
 
 
 def dequeue(channel_name):
-    next_client = channel_users[channel_name][1].pop(0)  # remove first client's name in the queue
-    next_client_socket = client_info[next_client][0]  # get their socket
-    channel_users[channel_name][0].append(next_client)  # add them to the room
-    # print(f"Dequeue, users in the room now: {channel_users[channel_name][0]}")
-    client_info[next_client][1] = "in-channel"  # set their status "in-channel"
-    client_join_room(next_client, channel_name, next_client_socket, code=2)  # server and joined client will print msg to the terminal
+    with disconnect_client_lock:
+        next_client = channel_users[channel_name][1].pop(0)  # remove first client's name in the queue
+        next_client_socket = client_info[next_client][0]  # get their socket
+        channel_users[channel_name][0].append(next_client)  # add them to the room
+        # print(f"Dequeue, users in the room now: {channel_users[channel_name][0]}")
+        client_info[next_client][1] = "in-channel"  # set their status "in-channel"
+        client_join_room(next_client, channel_name, next_client_socket, code=2)  # server and joined client will print msg to the terminal
 
 
 # disconnect -> notify channel -> join room/notify users
@@ -188,14 +190,14 @@ def disconnect_client(channel_name, username, client_socket, index, kick=False, 
         stdout.flush()
     if client_info[username][1] == "in-channel":
         # print(channel_users[channel_name][0])  # print list of clients in the room
-        channel_users[channel_name][0].remove(username) # remove a specific client in the room
-        if not AFK:
-            left_notification(username, channel_name, kick=kick)
-        capacity = channel_capacity[index]
-        # check queue and notify people in the queues
-        if len(channel_users[channel_name][0]) < capacity and len(channel_users[channel_name][1]) > 0:
-            dequeue(channel_name)
-        position = 0
+            channel_users[channel_name][0].remove(username) # remove a specific client in the room
+            if not AFK:
+                left_notification(username, channel_name, kick=kick)
+            capacity = channel_capacity[index]
+            position = 0
+            # check queue and notify people in the queues
+            if len(channel_users[channel_name][0]) < capacity and len(channel_users[channel_name][1]) > 0:
+                dequeue(channel_name)
     # if remove people in queue, notify the one after (find the index of the removed one)
     else:
         position = channel_users[channel_name][1].index(username)
@@ -213,8 +215,9 @@ def timeout_notification(username, channel_name):
 
 
 def left_notification(username, channel_name, kick=False):
-    left_channel_msg = f"[Server Message] {username} has left the channel.\n"
-    notify_channel(channel_name, left_channel_msg, kick=kick)
+    with disconnect_client_lock:
+        left_channel_msg = f"[Server Message] {username} has left the channel.\n"
+        notify_channel(channel_name, left_channel_msg, kick=kick)
 
 
 def list_channels(client_socket):
@@ -231,6 +234,7 @@ def list_channels(client_socket):
 # REF: The use of socket.settimeout() is inspired by the code at
 # REF: https://stackoverflow.com/questions/34371096/how-to-use-python-socket-settimeout-properly
 def handle_client(client_socket, client_address, index):
+    disconnected = False
     with client_socket:
         try:
             while data := client_socket.recv(BUFSIZE).decode():
@@ -246,6 +250,7 @@ def handle_client(client_socket, client_address, index):
                             client_first_connection(message[:-1][7:], index, client_address, client_socket)
                         elif message[:5] == "$Quit":
                             kicked = True if message[:-1][6:] == "kicked" else False
+                            disconnected = True
                             disconnect_client(channel_name, username, client_socket, index, kick=kicked)
                         elif message == "$List\n":
                             list_channels(client_socket)
@@ -259,17 +264,17 @@ def handle_client(client_socket, client_address, index):
             # also send this to all clients in the channel
             timeout_notification(username, channel_name)
             client_socket.sendall("$AFK\n".encode())
+            disconnected = True
             disconnect_client(channel_name, username, client_socket, index, AFK=True)
         except Exception:
             # print(f"Message at Exception: {message}", file=stdout)
-            # close the client's connection if they abruptly close
-            # if message[:5] != "$User" or message[:5] == "$Quit":
             if message[:5] != "$Quit":
-            #     # print("Handle exception")
-            #     kicked = True if message[6:] == "kicked" else False
+                disconnected = True
                 disconnect_client(channel_name, username, client_socket, index, kick=False)
             # print(f"Connection from {username} closed.")
     # error or EOF - client disconnected
+    if not disconnected:
+        disconnect_client(channel_name, username, client_socket, index, kick=False)  # abruptly closed
 
 
 def process_connections(listening_socket, index):
@@ -369,12 +374,13 @@ if __name__ == "__main__":
     # Main thread starts reading from stdin
     try:
         while line := input():
-            if line == "\n" or line[:9] == "/shutdown":
-                server_shutdown(line)
-            elif line[:5] == "/kick":
-                kick(line)
-            elif line[:6] == "/empty":
-                empty(line)
+            with lock:
+                if line == "\n" or line[:9] == "/shutdown":
+                    server_shutdown(line)
+                elif line[:5] == "/kick":
+                    kick(line)
+                elif line[:6] == "/empty":
+                    empty(line)
     except Exception as e:
         # print(e)
         pass
