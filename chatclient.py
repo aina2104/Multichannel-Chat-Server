@@ -71,6 +71,9 @@ def read_from_stdin(server_socket):
             if line == "\n" or line == "/quit\n":
                 server_socket.send("$Quit\n".encode())
                 quit()
+            elif line[:5] == "/quit":
+                stdout.write("[Server Message] Usage: /quit\n")
+                stdout.flush()
             elif line == "/k\n":
                 quit()
             elif line[:5] == "/list":
@@ -150,7 +153,7 @@ if __name__ == "__main__":
                     elif data == "$AFK\n":
                         quit()
                     elif data[0] != "$":
-                        stdout.write(data[:-1])
+                        stdout.write(data)
                         stdout.flush()
                     # server_socket.sendall(data.encode())
         except Exception:
