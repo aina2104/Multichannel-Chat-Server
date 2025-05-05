@@ -15,7 +15,7 @@ channel_names = []
 channel_port = []
 channel_capacity = []
 channel_queue_length = []  # not yet implemented
-client_info = {}  # {client_username: [client_socket, in-channel/in-queue}
+client_info = {}  # {client_username: [client_socket, in-channel/in-queue/disconnected}
 channel_users = {}  # {channel_names: [[user_1, user_2], [user_1_in_queue, user_2_in_queue]]}
 client_address_users = {}  # {client_address: [client_username, channel_name]}
 
@@ -184,6 +184,8 @@ def dequeue(channel_name):
 
 # disconnect -> notify channel -> join room/notify users
 def disconnect_client(channel_name, username, client_socket, index, kick=False, AFK=False):
+    if client_info[username][1] == "disconnected":
+        return
     client_socket.close()
     if kick:
         stdout.write(f"[Server Message] Kicked {username}.\n")
@@ -203,6 +205,7 @@ def disconnect_client(channel_name, username, client_socket, index, kick=False, 
         position = channel_users[channel_name][1].index(username)
         channel_users[channel_name][1].remove(username)
     # notify others in the queue
+    client_info[username][1] = "disconnected"
     for pos in range(position, len(channel_users[channel_name][1])):
         other_client_name = channel_users[channel_name][1][pos]
         other_client_socket = client_info[other_client_name][0]
@@ -234,7 +237,6 @@ def list_channels(client_socket):
 # REF: The use of socket.settimeout() is inspired by the code at
 # REF: https://stackoverflow.com/questions/34371096/how-to-use-python-socket-settimeout-properly
 def handle_client(client_socket, client_address, index):
-    disconnected = False
     with client_socket:
         try:
             while data := client_socket.recv(BUFSIZE).decode():
@@ -250,7 +252,6 @@ def handle_client(client_socket, client_address, index):
                             client_first_connection(message[:-1][7:], index, client_address, client_socket)
                         elif message[:5] == "$Quit":
                             kicked = True if message[:-1][6:] == "kicked" else False
-                            disconnected = True
                             disconnect_client(channel_name, username, client_socket, index, kick=kicked)
                         elif message == "$List\n":
                             list_channels(client_socket)
@@ -265,17 +266,14 @@ def handle_client(client_socket, client_address, index):
             # also send this to all clients in the channel
             timeout_notification(username, channel_name)
             client_socket.sendall("$AFK\n".encode())
-            disconnected = True
             disconnect_client(channel_name, username, client_socket, index, AFK=True)
         except Exception:
             # print(f"Message at Exception: {message}", file=stdout)
             if message[:5] != "$Quit":
-                disconnected = True
                 disconnect_client(channel_name, username, client_socket, index, kick=False)
             # print(f"Connection from {username} closed.")
     # error or EOF - client disconnected
-    if not disconnected:
-        disconnect_client(channel_name, username, client_socket, index, kick=False)  # abruptly closed
+    disconnect_client(channel_name, username, client_socket, index, kick=False)  # abruptly closed
 
 
 def process_connections(listening_socket, index):
@@ -330,11 +328,12 @@ def kick(orig_command):
     #                   kick=True)
 
 
-def empty(command):
-    command = command.split()
-    if len(command) != 2:
+def empty(line):
+    command = line.split()
+    if len(command) != 2 or line.count(" ") > 1:
         stdout.write("Usage: /empty channel_name\n")
         stdout.flush()
+        return
     channel_name = command[1]
     if not channel_exists(channel_name):
         return
@@ -342,6 +341,7 @@ def empty(command):
         client_socket = client_info[client_username][0]
         client_socket.sendall("$Empty\n".encode())
         client_socket.close()
+        client_info[client_username][1] = "disconnected"
     stdout.write(f"[Server Message] \"{channel_name}\" has been emptied.\n")
     stdout.flush()
     channel_users[channel_name][0] = []
