@@ -138,7 +138,7 @@ def read_from_stdin(server_socket):
 
 # Client Runtime Behaviour - when clients successfully connected to the channel
 def channel_connected(message, server_socket):
-    if data[:4] == "$01-":
+    if message[:4] == "$01-":
         print(f"Welcome to chatclient, {client_username}.")
     if message[4:16] == "JoinSuccess:":
         stdout.write(f"[Server Message] You have joined the channel \"{message[17:]}\".\n")
@@ -158,28 +158,7 @@ def removed(server_socket):
     quit()
 
 
-# REF: The use of Event and their function set(), wait() is inspired by the code at
-# REF: https://www.instructables.com/Starting-and-Stopping-Python-Threads-With-Events-i/
-if __name__ == "__main__":
-    process_command_line()
-    port_checking()
-    server_connected = Event()
-    
-    # Connect to server
-    server_socket = socket(AF_INET, SOCK_STREAM)
-    try:
-        server_socket.connect(('localhost', port_number))
-        # as soon as connections accepted, send server the username
-        user_msg = f"$User: {client_username}\n"
-        server_socket.send(user_msg.encode())
-    except Exception:
-        cant_connect(port_number)
-
-    # A thread to read from stdin
-    server_thread = Thread(target=read_from_stdin, args=(server_socket,))
-    server_thread.start()
-
-    # Main thread to read from server
+def handle_server(server_socket):
     with server_socket:
         try:
             while message := server_socket.recv(BUFSIZE).decode():
@@ -212,3 +191,34 @@ if __name__ == "__main__":
             os._exit(8)
     print("Error: server connection closed.", file=stderr)
     os._exit(8)
+
+
+def connect_server():
+    # Connect to server
+    server_socket = socket(AF_INET, SOCK_STREAM)
+    try:
+        server_socket.connect(('localhost', port_number))
+        # as soon as connections accepted, send server the username
+        user_msg = f"$User: {client_username}\n"
+        server_socket.send(user_msg.encode())
+    except Exception:
+        cant_connect(port_number)
+
+    # A thread to read from stdin
+    read_stdin_thread = Thread(target=read_from_stdin, args=(server_socket,))
+    read_stdin_thread.start()
+
+    # A thread to read from server
+    server_thread = Thread(target=handle_server, args=(server_socket,))
+    server_thread.start()
+
+
+# REF: The use of Event and their function set(), wait() is inspired by the code at
+# REF: https://www.instructables.com/Starting-and-Stopping-Python-Threads-With-Events-i/
+if __name__ == "__main__":
+    process_command_line()
+    port_checking()
+    server_connected = Event()
+
+    # Main thread to connect for the first time
+    connect_server()
