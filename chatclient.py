@@ -22,7 +22,7 @@ def invalid_command_line():
 
 def cant_connect(port_num):
     print(f"Error: Unable to connect to port {port_num}.", file=stderr)
-    exit(7)
+    os._exit(7)
 
 
 # REF: The use of os._exit() is inspired by the code at
