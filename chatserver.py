@@ -15,8 +15,8 @@ channel_names = []
 channel_port = []
 channel_capacity = []
 channel_queue_length = []  # not yet implemented
-client_info = {}  # {client_username: [client_socket, in-channel/in-queue/disconnected}
-channel_users = {}  # {channel_names: [[user_1, user_2], [user_1_in_queue, user_2_in_queue]]}
+client_info = {}  # {channel_name: {client_username: [client_socket, in-channel/in-queue/disconnected}}
+channel_users = {}  # {channel_name: [[user_1, user_2], [user_1_in_queue, user_2_in_queue]]}
 client_address_users = {}  # {client_address: [client_username, channel_name]}
 
 
@@ -150,12 +150,12 @@ def client_first_connection(client_username, index, client_address, client_socke
     if len(channel_users[channel_name][0]) < capacity:
         client_join_room(client_username, channel_name, client_socket, code=1)
         channel_users[channel_name][0].append(client_username)
-        client_info[client_username] = [client_socket, "in-channel"]
+        client_info[channel_name][client_username] = [client_socket, "in-channel"]
     # Wait in queue with X users ahead
     else:
         num_users_ahead = len(channel_users[channel_name][1])
         channel_users[channel_name][1].append(client_username)
-        client_info[client_username] = [client_socket, "in-queue"]
+        client_info[channel_name][client_username] = [client_socket, "in-queue"]
         notify_users_ahead(num_users_ahead, client_socket, code=1)
     return True
 
@@ -166,7 +166,7 @@ def notify_channel(channel_name, message, kick=False):
             stdout.write(message)
             stdout.flush()
         for other_client_name in channel_users[channel_name][0]:
-            client_socket = client_info[other_client_name][0]
+            client_socket = client_info[channel_name][other_client_name][0]
             client_socket.sendall(message.encode())
     except:
         # print("Error while handling notifying channels", file=stdout)
@@ -176,22 +176,22 @@ def notify_channel(channel_name, message, kick=False):
 def dequeue(channel_name):
     with disconnect_client_lock:
         next_client = channel_users[channel_name][1].pop(0)  # remove first client's name in the queue
-        next_client_socket = client_info[next_client][0]  # get their socket
+        next_client_socket = client_info[channel_name][next_client][0]  # get their socket
         channel_users[channel_name][0].append(next_client)  # add them to the room
         # print(f"Dequeue, users in the room now: {channel_users[channel_name][0]}")
-        client_info[next_client][1] = "in-channel"  # set their status "in-channel"
+        client_info[channel_name][next_client][1] = "in-channel"  # set their status "in-channel"
         client_join_room(next_client, channel_name, next_client_socket, code=2)  # server and joined client will print msg to the terminal
 
 
 # disconnect -> notify channel -> join room/notify users
 def disconnect_client(channel_name, username, client_socket, index, kick=False, AFK=False):
-    if client_info[username][1] == "disconnected":
+    if client_info[channel_name][username][1] == "disconnected":
         return
     client_socket.close()
     if kick:
         stdout.write(f"[Server Message] Kicked {username}.\n")
         stdout.flush()
-    if client_info[username][1] == "in-channel":
+    if client_info[channel_name][username][1] == "in-channel":
         # print(channel_users[channel_name][0])  # print list of clients in the room
             channel_users[channel_name][0].remove(username) # remove a specific client in the room
             if not AFK:
@@ -206,10 +206,10 @@ def disconnect_client(channel_name, username, client_socket, index, kick=False, 
         position = channel_users[channel_name][1].index(username)
         channel_users[channel_name][1].remove(username)
     # notify others in the queue
-    client_info[username][1] = "disconnected"
+    client_info[channel_name][username][1] = "disconnected"
     for pos in range(position, len(channel_users[channel_name][1])):
         other_client_name = channel_users[channel_name][1][pos]
-        other_client_socket = client_info[other_client_name][0]
+        other_client_socket = client_info[channel_name][other_client_name][0]
         notify_users_ahead(pos, other_client_socket, code=2)
 
 
@@ -257,7 +257,7 @@ def check_whisper_command(line, client_socket, channel_name, username):
         if target_username not in channel_users[channel_name][0]:
             client_socket.sendall(f"[Server Message] {target_username} is not in the channel.\n".encode())
             return
-        receiver_socket = client_info[target_username][0]  # get receiver info if in the channel
+        receiver_socket = client_info[channel_name][target_username][0]  # get receiver info if in the channel
         receiver_socket.sendall(f"[{username} whispers to you] {chat_message}\n".encode())
         client_socket.sendall(f"[{username} whispers to {target_username}] {chat_message}\n".encode())
     stdout.write(f"[{username} whispers to {target_username}] {chat_message}\n")
@@ -294,11 +294,11 @@ def handle_client(client_socket, client_address, index):
                         elif message[:8] == "/whisper":
                             check_whisper_command(message, client_socket, channel_name, username)
                         elif message[0] != "$" and message[0] != "/":
-                            if client_info[username][1] == "in-channel":
+                            if client_info[channel_name][username][1] == "in-channel":
                                 username, channel_name = client_address_users[client_address]
                                 to_send = f"[{username}] {message}" # message already includes \n
                                 notify_channel(channel_name, to_send)
-                        if client_info[username][1] == "in-channel":
+                        if client_info[channel_name][username][1] == "in-channel":
                             client_socket.settimeout(afk_time)
         except TimeoutError:
             # also send this to all clients in the channel
@@ -366,7 +366,7 @@ def kick(orig_command):
     if client_not_in_channel(client_username, channel_name):
         return
     # If the command is valid, kick!
-    client_socket = client_info[client_username][0]
+    client_socket = client_info[channel_name][client_username][0]
     # Sending the message below will make client sends a "$Quit" message, the socket will then be disconnected
     # handling by Exception catch in handle_client() - maybe should not do this
     client_socket.sendall("$Kick\n".encode())
@@ -385,10 +385,10 @@ def empty(line):
     if not channel_exists(channel_name):
         return
     for client_username in channel_users[channel_name][0]:
-        client_socket = client_info[client_username][0]
+        client_socket = client_info[channel_name][client_username][0]
         client_socket.sendall("$Empty\n".encode())
         client_socket.close()
-        client_info[client_username][1] = "disconnected"
+        client_info[channel_name][client_username][1] = "disconnected"
     stdout.write(f"[Server Message] \"{channel_name}\" has been emptied.\n")
     stdout.flush()
     channel_users[channel_name][0] = []
@@ -416,7 +416,7 @@ def mute(line):
         return
     stdout.write(f"[Server Message] Muted {client_username} for {duration} seconds.\n")
     stdout.flush()
-    client_socket = client_info[client_username][0]
+    client_socket = client_info[channel_name][client_username][0]
     client_socket.sendall(f"[Server Message] You have been muted for {duration} seconds.\n".encode())
 
 
@@ -432,6 +432,7 @@ if __name__ == "__main__":
     channels = [None] * remaining_ports  # store the socket object?
     listening_threads = [None] * remaining_ports  # don't think I need this
     channel_users = {each_channel: [[],[]] for each_channel in channel_names}  # check duplicate users in each channel
+    client_info = {each_channel: {} for each_channel in channel_names}
     # Thread per listening socket
     for index, port_num in enumerate(channel_port):
         listening_thread = Thread(target=start_server, args=(port_num, index))
