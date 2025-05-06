@@ -211,6 +211,7 @@ def disconnect_client(channel_name, username, client_socket, index, kick=False, 
                 dequeue(channel_name)
     # if remove people in queue, notify the one after (find the index of the removed one)
     else:
+        left_notification(username, channel_name, kick=False)
         position = channel_users[channel_name][1].index(username)
         channel_users[channel_name][1].remove(username)
     # notify others in the queue
