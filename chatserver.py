@@ -262,9 +262,9 @@ def check_switch_command(line, username, client_socket, index, this_channel):
         disconnect_client(this_channel, username, client_socket, index)
 
 
-# REF: The implementation of checking if a file is readable is Python is learned from
+# REF: The implementation of checking if a file is readable is learned from
 # REF: https://www.geeksforgeeks.org/check-if-file-is-readable-in-python/
-def check_send_command(line, client_socket, channel_name):
+def check_send_command(line, client_socket, channel_name, username):
     stop_processing = False
     command = line.split()
     target_username = command[1]
@@ -280,6 +280,8 @@ def check_send_command(line, client_socket, channel_name):
         stop_processing = True
     if stop_processing:
         return
+    receiver_socket = client_info[channel_name][target_username][0]
+    receiver_socket.sendall(f"$Filepath: {filepath} {username}\n".encode())
 
 
 def check_whisper_command(line, client_socket, channel_name, username):
@@ -294,6 +296,21 @@ def check_whisper_command(line, client_socket, channel_name, username):
         receiver_socket.sendall(f"[{username} whispers to you] {chat_message}\n".encode())
         client_socket.sendall(f"[{username} whispers to {target_username}] {chat_message}\n".encode())
     stdout.write(f"[{username} whispers to {target_username}] {chat_message}\n")
+    stdout.flush()
+
+
+def after_sent(line, receiver, channel_name, fail=False):
+    command = line.split()
+    filepath = command[1]
+    sender = command[2]
+    sender_socket = client_info[channel_name][sender][0]
+    if fail:
+        sender_socket.sendall(f"[Server Message] Failed to send \"{filepath}\" to {receiver}\n".encode())
+        return
+    sender_socket.sendall(f"[Server Message] Sent \"{filepath}\" to {receiver}.\n".encode())
+    base_filename = filepath.split('/')[-1]
+    message = f"[Server Message] {sender} sent \"{base_filename}\" to {receiver}.\n"
+    stdout.write(message)
     stdout.flush()
 
 
@@ -322,11 +339,15 @@ def handle_client(client_socket, client_address, index):
                             list_channels(client_socket)
                         elif message[:7] == "/switch":
                             check_switch_command(message, username, client_socket, index, channel_name)
+                        elif message[:12] == "$Failed-sent":
+                            after_sent(message, username, channel_name, fail=True)
+                        elif message[:13] == "$Success-sent":
+                            after_sent(message, username, channel_name)
                         elif client_info[channel_name][username][1][:16] == "in-channel-muted":
                             duration = client_info[channel_name][username][1][17:]
                             client_socket.sendall(f"[Server Message] You are still in mute for {duration} seconds.\n".encode())
                         elif message[:5] == "/send":
-                            check_send_command(message, client_socket, channel_name)
+                            check_send_command(message, client_socket, channel_name, username)
                         elif message[:8] == "/whisper":
                             check_whisper_command(message, client_socket, channel_name, username)
                         elif message[0] != "$" and message[0] != "/":
