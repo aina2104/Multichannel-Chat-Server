@@ -242,6 +242,28 @@ def check_switch_command(channel_name, username, client_socket):
         client_socket.sendall(f"$UserDup: {channel_name}\n".encode())
 
 
+def check_send_command(line, client_socket, channel_name):
+    command = line.split()
+    target_username = command[1]
+    if target_username not in channel_users[channel_name][0]:
+        client_socket.sendall(f"[Server Message] {target_username} is not in the channel.\n".encode())
+
+
+def check_whisper_command(line, client_socket, channel_name, username):
+    command = line.split()
+    target_username = command[1]
+    chat_message = command[2]
+    if target_username != username:
+        if target_username not in channel_users[channel_name][0]:
+            client_socket.sendall(f"[Server Message] {target_username} is not in the channel.\n".encode())
+            return
+        receiver_socket = client_info[target_username][0]  # get receiver info if in the channel
+        receiver_socket.sendall(f"[{username} whispers to you] {chat_message}\n".encode())
+        client_socket.sendall(f"[{username} whispers to {target_username}] {chat_message}\n".encode())
+    stdout.write(f"[{username} whispers to {target_username}] {chat_message}\n")
+    stdout.flush()
+
+
 # REF: The use of socket.settimeout() is inspired by the code at
 # REF: https://stackoverflow.com/questions/34371096/how-to-use-python-socket-settimeout-properly
 def handle_client(client_socket, client_address, index):
@@ -267,6 +289,10 @@ def handle_client(client_socket, client_address, index):
                             list_channels(client_socket)
                         elif message[:7] == "/switch":
                             check_switch_command(channel_name, username, client_socket)
+                        elif message[:5] == "/send":
+                            check_send_command(message, client_socket, channel_name)
+                        elif message[:8] == "/whisper":
+                            check_whisper_command(message, client_socket, channel_name, username)
                         elif message[0] != "$" and message[0] != "/":
                             if client_info[username][1] == "in-channel":
                                 username, channel_name = client_address_users[client_address]
@@ -319,9 +345,17 @@ def channel_exists(channel_name):
     return True
 
 
+def client_not_in_channel(client_username, channel_name):
+    if client_username not in channel_users[channel_name][0]:
+        stdout.write(f"[Server Message] {client_username} is not in the channel.\n")
+        stdout.flush()
+        return True
+    return False
+
+
 def kick(orig_command):
     command = orig_command.split()
-    if len(command) != 3 or orig_command.count(" ") > 2:
+    if len(command) != 3 or orig_command.count(" ") != 2:
         stdout.write("Usage: /kick channel_name client_username\n")
         stdout.flush()
         return
@@ -329,9 +363,7 @@ def kick(orig_command):
     client_username = command[2]
     if not channel_exists(channel_name):
         return
-    if client_username not in channel_users[channel_name][0]:
-        stdout.write(f"[Server Message] {client_username} is not in the channel.\n")
-        stdout.flush()
+    if client_not_in_channel(client_username, channel_name):
         return
     # If the command is valid, kick!
     client_socket = client_info[client_username][0]
@@ -345,7 +377,7 @@ def kick(orig_command):
 
 def empty(line):
     command = line.split()
-    if len(command) != 2 or line.count(" ") > 1:
+    if len(command) != 2 or line.count(" ") != 1:
         stdout.write("Usage: /empty channel_name\n")
         stdout.flush()
         return
@@ -363,6 +395,29 @@ def empty(line):
     capacity = channel_capacity[channel_names.index(channel_name)]
     while len(channel_users[channel_name][0]) < capacity and len(channel_users[channel_name][1]) > 0:
         dequeue(channel_name)
+
+
+def mute(line):
+    command = line.split()
+    if len(command) != 4 or line.count(" ") != 3:
+        stdout.write("Usage: /mute channel_name client_username duration\n")
+        stdout.flush()
+        return
+    channel_name = command[1]
+    if not channel_exists(channel_name):
+        return
+    client_username = command[2]
+    if client_not_in_channel(client_username, channel_name):
+        return
+    duration = command[3]
+    if not duration.isdigit() or int(duration) < 0:
+        stdout.write("[Server Message] Invalid mute duration.\n")
+        stdout.flush()
+        return
+    stdout.write(f"[Server Message] Muted {client_username} for {duration} seconds.\n")
+    stdout.flush()
+    client_socket = client_info[client_username][0]
+    client_socket.sendall(f"[Server Message] You have been muted for {duration} seconds.\n".encode())
 
 
 # REF: The use of Event and their function set(), wait() is inspired by the code at
@@ -397,6 +452,8 @@ if __name__ == "__main__":
                     kick(line)
                 elif line[:6] == "/empty":
                     empty(line)
+                elif line[:5] == "/mute":
+                    mute(line)
     except Exception as e:
         # print(e)
         pass
