@@ -9,6 +9,7 @@ port_number = None
 client_username = None
 server_connected = None
 exit_status = Event()
+status = None
 
 
 def invalid_command_line():
@@ -64,11 +65,43 @@ def check_command_list(command, server_socket):
 
 def check_command_switch(line, server_socket):
     command = line.split()
-    if len(command) != 2 or line.count(" ") > 1:
+    if len(command) != 2 or line.count(" ") != 1:
         stdout.write("[Server Message] Usage: /switch channel_name\n")
         stdout.flush()
     else:
         server_socket.sendall(line.encode())
+
+
+def check_command_send(line, server_socket):
+    if status == "in-queue":
+        return
+    command = line.split()
+    if len(command) != 3 or line.count(" ") != 2:
+        stdout.write("[Server Message] Usage: /send target_client_username file_path\n")
+        stdout.flush()
+        return
+    target_username = command[1]
+    if target_username == client_username:
+        stdout.write("[Server Message] Cannot send file to yourself.\n")
+        stdout.flush()
+        return
+    server_socket.sendall(line.encode())
+
+
+def check_command_whisper(line, server_socket):
+    if status == "in-queue":
+        return
+    command = line.split()
+    if len(command) != 3 or line.count(" ") != 2:
+        stdout.write("[Server Message] Usage: /whisper receiver_client_username chat_message\n")
+        stdout.flush()
+        return
+    target_username = command[1]
+    chat_message = command[2]  # this does not include "\n"
+    if target_username == client_username:  # whispers to self
+        stdout.write(f"[{client_username} whispers to you] {chat_message}\n")
+        stdout.flush()
+    server_socket.sendall(line.encode())
 
 
 # A 2nd thread to continuously read data sent from server
@@ -83,12 +116,14 @@ def read_from_stdin(server_socket):
             elif line[:5] == "/quit":
                 stdout.write("[Server Message] Usage: /quit\n")
                 stdout.flush()
-            elif line == "/k\n":
-                quit()
             elif line[:5] == "/list":
                 check_command_list(line, server_socket)
             elif line[:7] == "/switch":
                 check_command_switch(line, server_socket)
+            elif line[:5] == "/send":
+                check_command_send(line, server_socket)
+            elif line[:8] == "/whisper":
+                check_command_whisper(line, server_socket)
             elif line[0] != "/" and line[0] != "$":
                 server_socket.send(line.encode())
             # data = server_socket.recv(BUFSIZE).decode()
@@ -109,9 +144,11 @@ def channel_connected(message, server_socket):
         stdout.write(f"[Server Message] You have joined the channel \"{message[17:]}\".\n")
         stdout.flush()
         server_socket.sendall("$Joined\n".encode())
+        status = "in-channel"
     elif message[4:12] == "InQueue:":
         stdout.write(f"[Server Message] You are in the waiting queue and there are {message[13:]} user(s) ahead of you.\n")
         stdout.flush()
+        status = "in-queue"
 
 
 def removed(server_socket):
