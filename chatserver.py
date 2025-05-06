@@ -4,6 +4,7 @@ from threading import Event, Thread, Lock, current_thread
 from time import sleep
 import os
 
+cant_listen_detected = False
 lock = Lock()
 disconnect_client_lock = Lock()
 create_all_ports = Event()
@@ -14,7 +15,7 @@ config_filename = None
 channel_names = []
 channel_port = []
 channel_capacity = []
-channel_queue_length = []  # not yet implemented
+listening_channel_sockets = None
 client_info = {}  # {channel_name: {client_username: [client_socket, in-channel/in-queue/disconnected}}
 channel_users = {}  # {channel_name: [[user_1, user_2], [user_1_in_queue, user_2_in_queue]]}
 client_address_users = {}  # {client_address: [client_username, channel_name]}
@@ -28,11 +29,6 @@ def invalid_command_line():
 def invalid_file():
     print("Error: Invalid configuration file.", file=stderr)
     exit(5)
-
-
-def cant_listen(port_num):
-    print(f"Error: unable to listen on port {port_num}.", file=stderr)
-    exit(6)  # maybe have to wait until all unlistened port error msg are printed before exiting
 
 
 def is_whitespace(command):
@@ -94,19 +90,25 @@ def check_valid_file():
         check_file_format(line.strip().split())
 
 
-def start_server(port_num, index):
-    global remaining_ports
-    name = channel_names[index]
-    capacity = channel_capacity[index]
-
+def listen_to_channel_sockets(port_num, index):
+    global cant_listen_detected
     listening_socket = socket(AF_INET, SOCK_STREAM)
     # set socket option to allow the reuse of address
     listening_socket.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
     try:
         listening_socket.bind(('', port_num))
     except Exception:
-        cant_listen(port_num)
+        print(f"Error: unable to listen on port {port_num}.", file=stderr)
+        cant_listen_detected = True
     listening_socket.listen(5)
+    listening_channel_sockets[index] = listening_socket
+
+
+def start_server(port_num, index):
+    global remaining_ports
+    name = channel_names[index]
+    capacity = channel_capacity[index]
+    listening_socket = listening_channel_sockets[index]
     stdout.write(f"Channel \"{name}\" is created on port {port_num}, with a capacity of {capacity}.\n")
     stdout.flush()
     remaining_ports -= 1  # tell program 1 port has been created
@@ -440,9 +442,14 @@ if __name__ == "__main__":
     check_valid_file()
     remaining_ports = len(channel_port)  # will be decrement to check finished port
     channels = [None] * remaining_ports  # store the socket object?
-    listening_threads = [None] * remaining_ports  # don't think I need this
+    listening_channel_sockets = [None] * remaining_ports
     channel_users = {each_channel: [[],[]] for each_channel in channel_names}  # check duplicate users in each channel
     client_info = {each_channel: {} for each_channel in channel_names}
+    # Listen to each socket first
+    for index, port_num in enumerate(channel_port):
+        listen_to_channel_sockets(port_num, index)
+    if cant_listen_detected:
+        os._exit(6)
     # Thread per listening socket
     for index, port_num in enumerate(channel_port):
         listening_thread = Thread(target=start_server, args=(port_num, index))
