@@ -262,11 +262,24 @@ def check_switch_command(line, username, client_socket, index, this_channel):
         disconnect_client(this_channel, username, client_socket, index)
 
 
+# REF: The implementation of checking if a file is readable is Python is learned from
+# REF: https://www.geeksforgeeks.org/check-if-file-is-readable-in-python/
 def check_send_command(line, client_socket, channel_name):
+    stop_processing = False
     command = line.split()
     target_username = command[1]
     if target_username not in channel_users[channel_name][0]:
         client_socket.sendall(f"[Server Message] {target_username} is not in the channel.\n".encode())
+        stop_processing = True
+    filepath = command[2]
+    try:
+        with open(filepath) as file:
+            pass
+    except IOError:
+        client_socket.sendall(f"[Server Message] \"{filepath}\" does not exist.\n".encode())
+        stop_processing = True
+    if stop_processing:
+        return
 
 
 def check_whisper_command(line, client_socket, channel_name, username):
