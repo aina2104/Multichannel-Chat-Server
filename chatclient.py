@@ -3,6 +3,7 @@ from socket import *
 from threading import Thread, Event
 import os
 from time import sleep
+import shutil
 
 BUFSIZE = 1024
 
@@ -163,6 +164,24 @@ def switch_channel(line):
     switching = True
 
 
+def save_file(line, server_socket):
+    command = line.split()
+    filepath = command[1]
+    sender_username = command[2]
+    cur_directory = os.path.dirname(os.path.abspath(argv[0]))
+    # stdout.write(f"{cur_directory}\n")
+    # stdout.flush()
+    try:
+        shutil.copy(filepath, cur_directory)
+    except:
+        server_socket.sendall(f"$Failed-sent: {filepath} {sender_username}\n".encode())
+        return
+    server_socket.sendall(f"$Success-sent: {filepath} {sender_username}\n".encode())
+    base_filename = filepath.split('/')[-1]
+    stdout.write(f"[Server Message] {sender_username} sent \"{base_filename}\" to {client_username}.\n")
+    stdout.flush()
+
+
 def handle_server(server_socket):
     with server_socket:
         try:
@@ -179,6 +198,8 @@ def handle_server(server_socket):
                     elif data[:4] == "$01-" or data[:4] == "$02-":
                         channel_connected(data[:-1], server_socket)
                         server_connected.set()
+                    elif data[:9] == "$Filepath":
+                        save_file(data, server_socket)
                     elif data == "$Kick\n":
                         server_socket.sendall("$Quit-kicked\n".encode())
                         removed(server_socket)
