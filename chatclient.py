@@ -26,7 +26,6 @@ def cant_connect(port_num):
 def username_error(channel_name):
     stdout.write(f"[Server Message] Channel \"{channel_name}\" already has user {client_username}.\n")
     stdout.flush()
-    os._exit(2)
 
 
 def quit():
@@ -60,7 +59,17 @@ def check_command_list(command, server_socket):
         stdout.write("[Server Message] Usage: /list\n")
         stdout.flush()
     else:
-        server_socket.send("$List\n".encode())
+        server_socket.sendall("$List\n".encode())
+
+
+def check_command_switch(line, server_socket):
+    command = line.split()
+    if len(command) != 2 or line.count(" ") > 1:
+        stdout.write("[Server Message] Usage: /switch channel_name\n")
+        stdout.flush()
+    else:
+        server_socket.sendall(line.encode())
+
 
 # A 2nd thread to continuously read data sent from server
 def read_from_stdin(server_socket):
@@ -78,6 +87,8 @@ def read_from_stdin(server_socket):
                 quit()
             elif line[:5] == "/list":
                 check_command_list(line, server_socket)
+            elif line[:7] == "/switch":
+                check_command_switch(line, server_socket)
             elif line[0] != "/" and line[0] != "$":
                 server_socket.send(line.encode())
             # data = server_socket.recv(BUFSIZE).decode()
@@ -141,7 +152,10 @@ if __name__ == "__main__":
                     message = message[(newline_index+1):]
                     if data[:10] == "$UserError":
                         username_error(data[:-1][12:])
-                    if data[:4] == "$01-" or data[:4] == "$02-":
+                        os._exit(2)
+                    elif data[:8] == "$UserDup":
+                        username_error(data[:-1][10:])
+                    elif data[:4] == "$01-" or data[:4] == "$02-":
                         channel_connected(data[:-1], server_socket)
                         server_connected.set()
                     elif data == "$Kick\n":

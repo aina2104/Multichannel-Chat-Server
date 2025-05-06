@@ -235,6 +235,13 @@ def list_channels(client_socket):
         client_socket.sendall(list_message.encode())
 
 
+def check_switch_command(channel_name, username, client_socket):
+    if channel_name not in channel_names:
+        client_socket.sendall(f"[Server Message] Channel \"{channel_name}\" does not exist.\n".encode())
+    elif duplicate_usernames(username, channel_name):
+        client_socket.sendall(f"$UserDup: {channel_name}\n".encode())
+
+
 # REF: The use of socket.settimeout() is inspired by the code at
 # REF: https://stackoverflow.com/questions/34371096/how-to-use-python-socket-settimeout-properly
 def handle_client(client_socket, client_address, index):
@@ -258,6 +265,8 @@ def handle_client(client_socket, client_address, index):
                             disconnect_client(channel_name, username, client_socket, index, kick=kicked)
                         elif message == "$List\n":
                             list_channels(client_socket)
+                        elif message[:7] == "/switch":
+                            check_switch_command(channel_name, username, client_socket)
                         elif message[0] != "$" and message[0] != "/":
                             if client_info[username][1] == "in-channel":
                                 username, channel_name = client_address_users[client_address]
