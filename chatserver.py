@@ -244,13 +244,20 @@ def list_channels(client_socket):
         client_socket.sendall(list_message.encode())
 
 
-def check_switch_command(line, username, client_socket):
+def check_switch_command(line, username, client_socket, index, this_channel):
     command = line.split()
     channel_name = command[1]
     if channel_name not in channel_names:
         client_socket.sendall(f"[Server Message] Channel \"{channel_name}\" does not exist.\n".encode())
     elif duplicate_usernames(username, channel_name):
         client_socket.sendall(f"$UserDup: {channel_name}\n".encode())
+    else:
+        pos = channel_names.index(channel_name)
+        port_num = channel_port[pos]
+        client_socket.sendall(f"$Switch: {port_num}\n".encode())
+        # wait a bit for client to set up
+        sleep(0.5)
+        disconnect_client(this_channel, username, client_socket, index)
 
 
 def check_send_command(line, client_socket, channel_name):
@@ -299,7 +306,7 @@ def handle_client(client_socket, client_address, index):
                         elif message == "$List\n":
                             list_channels(client_socket)
                         elif message[:7] == "/switch":
-                            check_switch_command(message, username, client_socket)
+                            check_switch_command(message, username, client_socket, index, channel_name)
                         elif client_info[channel_name][username][1][:16] == "in-channel-muted":
                             duration = client_info[channel_name][username][1][17:]
                             client_socket.sendall(f"[Server Message] You are still in mute for {duration} seconds.\n".encode())

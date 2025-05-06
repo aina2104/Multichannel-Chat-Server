@@ -2,14 +2,16 @@ from sys import argv, stderr, stdout, stdin, exit
 from socket import *
 from threading import Thread, Event
 import os
+from time import sleep
 
 BUFSIZE = 1024
 
 port_number = None
 client_username = None
 server_connected = None
-exit_status = Event()
 status = None
+switching = False
+stop_thread = False
 
 
 def invalid_command_line():
@@ -126,14 +128,8 @@ def read_from_stdin(server_socket):
                 check_command_whisper(line, server_socket)
             elif line[0] != "/" and line[0] != "$":
                 server_socket.send(line.encode())
-            # data = server_socket.recv(BUFSIZE).decode()
-            # stdout.buffer.write(data)
-            # stdout.flush()
     except Exception as e:
-        # print("Reached Exception", file=stdout)
-        # print(e, file=stdout)
         pass
-    # print("You are disconnected.", file=stdout)
 
 
 # Client Runtime Behaviour - when clients successfully connected to the channel
@@ -156,6 +152,13 @@ def removed(server_socket):
     stdout.flush()
     server_socket.close()
     quit()
+
+
+def switch_channel(line):
+    global switching
+    global port_number
+    port_number = int(line.split()[1])
+    switching = True
 
 
 def handle_server(server_socket):
@@ -182,35 +185,50 @@ def handle_server(server_socket):
                         removed(server_socket)
                     elif data == "$AFK\n":
                         quit()
+                    elif data[:7] == "$Switch":
+                        switch_channel(data)
                     elif data[0] != "$":
                         stdout.write(data)
                         stdout.flush()
-                    # server_socket.sendall(data.encode())
         except Exception:
             print("Error: server connection closed.", file=stderr)
             os._exit(8)
-    print("Error: server connection closed.", file=stderr)
-    os._exit(8)
 
 
 def connect_server():
+    global switching
+    global server_connected
+    global stop_thread
+    stop_thread = False
+    server_connected = Event()
+
     # Connect to server
     server_socket = socket(AF_INET, SOCK_STREAM)
     try:
         server_socket.connect(('localhost', port_number))
         # as soon as connections accepted, send server the username
+        switching = False
         user_msg = f"$User: {client_username}\n"
         server_socket.send(user_msg.encode())
     except Exception:
         cant_connect(port_number)
 
+    stop_thread = False
+    sleep(0.1)
+    # A thread to read from server
+    server_thread = Thread(target=handle_server, args=(server_socket,))
+    server_thread.start()
     # A thread to read from stdin
     read_stdin_thread = Thread(target=read_from_stdin, args=(server_socket,))
     read_stdin_thread.start()
 
-    # A thread to read from server
-    server_thread = Thread(target=handle_server, args=(server_socket,))
-    server_thread.start()
+    server_thread.join()
+
+    if switching is True:
+        return
+    else:
+        print("Error: server connection closed.", file=stderr)
+        os._exit(8)
 
 
 # REF: The use of Event and their function set(), wait() is inspired by the code at
@@ -218,7 +236,7 @@ def connect_server():
 if __name__ == "__main__":
     process_command_line()
     port_checking()
-    server_connected = Event()
 
     # Main thread to connect for the first time
-    connect_server()
+    while True:
+        connect_server()
