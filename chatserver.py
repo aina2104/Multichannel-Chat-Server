@@ -114,6 +114,14 @@ def start_server(port_num, index):
     process_connections(listening_socket, index)  # generate threads per client
 
 
+def process_connections(listening_socket, index):
+    while True:
+        client_socket, client_address = listening_socket.accept()
+        client_thread = Thread(target=handle_client, 
+                            args=(client_socket, client_address, index))
+        client_thread.start()
+
+
 def duplicate_usernames(username, channel_name):
     if any(username in queue for queue in channel_users[channel_name]):
         return True
@@ -235,7 +243,9 @@ def list_channels(client_socket):
         client_socket.sendall(list_message.encode())
 
 
-def check_switch_command(channel_name, username, client_socket):
+def check_switch_command(line, username, client_socket):
+    command = line.split()
+    channel_name = command[1]
     if channel_name not in channel_names:
         client_socket.sendall(f"[Server Message] Channel \"{channel_name}\" does not exist.\n".encode())
     elif duplicate_usernames(username, channel_name):
@@ -288,7 +298,7 @@ def handle_client(client_socket, client_address, index):
                         elif message == "$List\n":
                             list_channels(client_socket)
                         elif message[:7] == "/switch":
-                            check_switch_command(channel_name, username, client_socket)
+                            check_switch_command(message, username, client_socket)
                         elif client_info[channel_name][username][1][:16] == "in-channel-muted":
                             duration = client_info[channel_name][username][1][17:]
                             client_socket.sendall(f"[Server Message] You are still in mute for {duration} seconds.\n".encode())
@@ -318,14 +328,6 @@ def handle_client(client_socket, client_address, index):
         client_socket.close()
     else:
         disconnect_client(channel_name, username, client_socket, index, kick=False)  # abruptly closed
-
-
-def process_connections(listening_socket, index):
-    while True:
-        client_socket, client_address = listening_socket.accept()
-        client_thread = Thread(target=handle_client, 
-                            args=(client_socket, client_address, index))
-        client_thread.start()
 
 
 # REF: The use of os._exit() is inspired by the code at
