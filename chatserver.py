@@ -256,7 +256,7 @@ def check_switch_command(line, username, client_socket, index, this_channel):
         port_num = channel_port[pos]
         client_socket.sendall(f"$Switch: {port_num}\n".encode())
         # wait a bit for client to set up
-        sleep(0.5)
+        sleep(0.1)
         disconnect_client(this_channel, username, client_socket, index)
 
 
@@ -341,7 +341,7 @@ def handle_client(client_socket, client_address, index):
 # REF: The use of os._exit() is inspired by the code at
 # REF: https://stackoverflow.com/questions/1489669/how-to-exit-the-entire-application-from-a-python-thread
 def server_shutdown(command):
-    if not (command == "/shutdown" or command == "\n"):
+    if command != "/shutdown\n":
         stdout.write("Usage: /shutdown\n")
         stdout.flush()
         return
@@ -438,9 +438,6 @@ def mute(line):
 if __name__ == "__main__":
     process_command_line()
     check_valid_file()
-    # print(channel_names)
-    # print(channel_port)
-    # print(channel_capacity)
     remaining_ports = len(channel_port)  # will be decrement to check finished port
     channels = [None] * remaining_ports  # store the socket object?
     listening_threads = [None] * remaining_ports  # don't think I need this
@@ -458,9 +455,11 @@ if __name__ == "__main__":
 
     # Main thread starts reading from stdin
     try:
-        while line := input():
+        for line in stdin:
             with lock:
-                if line == "\n" or line[:9] == "/shutdown":
+                if not line:
+                    server_shutdown("/shutdown\n")
+                if line[:9] == "/shutdown":
                     server_shutdown(line)
                 elif line[:5] == "/kick":
                     kick(line)
@@ -468,7 +467,6 @@ if __name__ == "__main__":
                     empty(line)
                 elif line[:5] == "/mute":
                     mute(line)
-    except Exception as e:
-        # print(e)
+    except Exception:
         pass
-    # print("Server is disconnected.", file=stdout)
+    server_shutdown("/shutdown\n")

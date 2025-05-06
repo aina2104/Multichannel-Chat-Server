@@ -12,6 +12,7 @@ server_connected = None
 status = None
 switching = False
 stop_thread = False
+current_server_socket = None
 
 
 def invalid_command_line():
@@ -107,29 +108,30 @@ def check_command_whisper(line, server_socket):
 
 
 # A 2nd thread to continuously read data sent from server
-def read_from_stdin(server_socket):
+def read_from_stdin():
     global server_connected
     server_connected.wait()
     try:
         for line in stdin:
-            if line == "\n" or line == "/quit\n":
-                server_socket.send("$Quit\n".encode())
+            if line == "/quit\n":
+                current_server_socket.send("$Quit\n".encode())
                 quit()
             elif line[:5] == "/quit":
                 stdout.write("[Server Message] Usage: /quit\n")
                 stdout.flush()
             elif line[:5] == "/list":
-                check_command_list(line, server_socket)
+                check_command_list(line, current_server_socket)
             elif line[:7] == "/switch":
-                check_command_switch(line, server_socket)
+                check_command_switch(line, current_server_socket)
             elif line[:5] == "/send":
-                check_command_send(line, server_socket)
+                check_command_send(line, current_server_socket)
             elif line[:8] == "/whisper":
-                check_command_whisper(line, server_socket)
+                check_command_whisper(line, current_server_socket)
             elif line[0] != "/" and line[0] != "$":
-                server_socket.send(line.encode())
+                current_server_socket.send(line.encode())
     except Exception as e:
         pass
+    quit()
 
 
 # Client Runtime Behaviour - when clients successfully connected to the channel
@@ -191,16 +193,13 @@ def handle_server(server_socket):
                         stdout.write(data)
                         stdout.flush()
         except Exception:
-            print("Error: server connection closed.", file=stderr)
-            os._exit(8)
+            pass
 
 
 def connect_server():
     global switching
-    global server_connected
     global stop_thread
-    stop_thread = False
-    server_connected = Event()
+    global current_server_socket
 
     # Connect to server
     server_socket = socket(AF_INET, SOCK_STREAM)
@@ -213,14 +212,12 @@ def connect_server():
     except Exception:
         cant_connect(port_number)
 
+    current_server_socket = server_socket
     stop_thread = False
     sleep(0.1)
     # A thread to read from server
     server_thread = Thread(target=handle_server, args=(server_socket,))
     server_thread.start()
-    # A thread to read from stdin
-    read_stdin_thread = Thread(target=read_from_stdin, args=(server_socket,))
-    read_stdin_thread.start()
 
     server_thread.join()
 
@@ -236,7 +233,12 @@ def connect_server():
 if __name__ == "__main__":
     process_command_line()
     port_checking()
+    server_connected = Event()
 
-    # Main thread to connect for the first time
+    # A thread to read from stdin
+    read_stdin_thread = Thread(target=read_from_stdin, args=())
+    read_stdin_thread.start()
+
+    # Main thread to connect to server forever
     while True:
         connect_server()
